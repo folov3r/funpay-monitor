@@ -6,7 +6,7 @@ VK-бот для мониторинга цен на игровом маркет�
 
 ## Возможности (план)
 
-- [ ] Парсинг категорий FunPay (`/chips/`, `/lots/`)
+- [x] Парсинг категорий FunPay (`/chips/`, `/lots/`)
 - [ ] История цен в PostgreSQL (снапшоты: мин/медиана/кол-во офферов)
 - [ ] Подписки: категория + сервер + условие алерта
 - [ ] Команды `/start`, `/add`, `/list`, `/stats`, `/unsubscribe`
@@ -55,6 +55,24 @@ ruff check .    # линтер
 | `REQUEST_DELAY_SECONDS` | `3` | Пауза между HTTP-запросами к FunPay |
 | `ALERT_COOLDOWN_HOURS` | `6` | Минимальный интервал между алертами по одной подписке |
 
+## Парсер FunPay
+
+`FunPayParser` разбирает серверный HTML страниц `/chips/{id}/` и `/lots/{id}/`:
+
+- офферы — `a.tc-item`, цена — `div.tc-price`, количество — `div.tc-amount` (`кк` нормализуется в миллионы);
+- сервер — `data-server` + `div.tc-server`, продавец — `data-user` или ссылка на профиль;
+- флаги `offer-promo` и онлайн-статус продавца;
+- HTTP-клиент держит паузу между запросами и повторяет их с backoff при 429/5xx.
+
+Ручной прогон без бота и БД:
+
+```bash
+python scripts/parse_once.py /chips/30/
+python scripts/parse_once.py https://funpay.com/lots/13/
+```
+
+Тесты парсера работают на сохранённых HTML-фикстурах (`tests/fixtures/funpay/`) и не ходят в сеть.
+
 ## Настройка сообщества VK
 
 1. Создать сообщество → «Управление» → «Сообщения сообщества»: включить.
@@ -74,6 +92,7 @@ app/
   main.py     # entrypoint бота
   worker.py   # entrypoint воркера
 alembic/      # миграции схемы БД
+scripts/      # ручной прогон парсера
 tests/        # pytest, HTML-фикстуры
 docs/         # MkDocs (позже)
 ```
