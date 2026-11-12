@@ -175,6 +175,8 @@ class Subscription(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="subscriptions")
+    category: Mapped[Category] = relationship()
+    server: Mapped[Server | None] = relationship()
     notifications: Mapped[list[Notification]] = relationship(
         back_populates="subscription", cascade="all, delete-orphan"
     )

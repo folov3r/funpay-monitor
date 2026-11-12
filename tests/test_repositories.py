@@ -7,14 +7,22 @@ from app.db.repositories import (
     PARSE_RUN_OK,
     PARSE_RUN_RUNNING,
     add_price_snapshots,
+    count_active_subscriptions,
+    current_price_summary,
+    deactivate_subscription,
     finish_parse_run,
     get_category_by_path,
     get_or_create_category,
+    get_or_create_user,
+    get_user_subscription,
     list_active_categories,
+    list_aggregated_snapshots,
     list_price_snapshots,
+    list_user_subscriptions,
     replace_offers,
     start_parse_run,
     upsert_servers,
+    upsert_subscription,
 )
 from app.parsers.base import CategoryInfo
 from app.parsers.base import Offer as ParsedOffer
@@ -262,3 +270,133 @@ async def test_list_price_snapshots_filters_and_orders(
         start + timedelta(days=2),
         start + timedelta(days=3),
     ]
+
+
+async def test_user_upsert_reuses_row(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        user = await get_or_create_user(session, 1001)
+        await session.commit()
+        user_id = user.id
+
+    async with session_factory() as session:
+        same = await get_or_create_user(session, 1001, first_name="Konstantin")
+        await session.commit()
+
+    assert same.id == user_id
+    assert same.first_name == "Konstantin"
+
+
+async def test_subscription_lifecycle(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        user = await get_or_create_user(session, 2001)
+        category = await get_or_create_category(session, INFO)
+        servers = await upsert_servers(
+            session,
+            category.id,
+            [parsed_offer(server_id=1, server_name="EU")],
+        )
+        subscription = await upsert_subscription(
+            session,
+            user_id=user.id,
+            category_id=category.id,
+            server_id=servers[1].id,
+            mode="abs",
+            threshold=Decimal("100"),
+        )
+        await session.commit()
+        user_id = user.id
+        category_id = category.id
+        server_id = servers[1].id
+        subscription_id = subscription.id
+
+    async with session_factory() as session:
+        subscriptions = await list_user_subscriptions(session, user_id)
+        fetched = await get_user_subscription(session, subscription_id, user_id)
+        count = await count_active_subscriptions(session, user_id)
+
+    assert len(subscriptions) == 1
+    assert subscriptions[0].category.title == "Серебро Albion Online"
+    assert subscriptions[0].server is not None
+    assert subscriptions[0].server.name == "EU"
+    assert fetched is not None
+    assert fetched.id == subscription_id
+    assert count == 1
+
+    async with session_factory() as session:
+        updated = await upsert_subscription(
+            session,
+            user_id=user_id,
+            category_id=category_id,
+            server_id=server_id,
+            mode="abs",
+            threshold=Decimal("80"),
+        )
+        await session.commit()
+        assert updated.id == subscription_id
+        assert updated.threshold == Decimal("80")
+
+    async with session_factory() as session:
+        removed = await deactivate_subscription(session, subscription_id, user_id)
+        await session.commit()
+        assert removed is not None
+
+    async with session_factory() as session:
+        subscriptions = await list_user_subscriptions(session, user_id)
+        count = await count_active_subscriptions(session, user_id)
+        duplicate = await upsert_subscription(
+            session,
+            user_id=user_id,
+            category_id=category_id,
+            server_id=server_id,
+            mode="abs",
+            threshold=Decimal("90"),
+        )
+        await session.commit()
+
+    assert subscriptions == []
+    assert count == 0
+    assert duplicate.id != subscription_id
+
+
+async def test_current_price_summary_and_aggregation(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    offers = [
+        parsed_offer(server_id=1, server_name="EU", price=Decimal("10")),
+        parsed_offer(server_id=1, server_name="EU", price=Decimal("20")),
+        parsed_offer(server_id=2, server_name="NA", price=Decimal("30")),
+    ]
+
+    async with session_factory() as session:
+        category = await get_or_create_category(session, INFO)
+        servers = await upsert_servers(session, category.id, offers)
+        await replace_offers(session, category.id, offers, servers)
+        await add_price_snapshots(session, category.id, offers, servers)
+        await session.commit()
+        category_id = category.id
+        eu_id = servers[1].id
+
+    async with session_factory() as session:
+        everything = await current_price_summary(session, category_id)
+        europe = await current_price_summary(session, category_id, eu_id)
+        missing = await current_price_summary(session, category_id, 999999)
+        aggregates = await list_aggregated_snapshots(session, category_id)
+
+    assert everything is not None
+    assert everything.min_price == Decimal("10")
+    assert everything.median_price == Decimal("20")
+    assert everything.offer_count == 3
+    assert europe is not None
+    assert europe.min_price == Decimal("10")
+    assert europe.median_price == Decimal("15")
+    assert europe.offer_count == 2
+    assert missing is None
+
+    assert len(aggregates) == 1
+    assert aggregates[0].min_price == Decimal("10")
+    assert aggregates[0].median_price == Decimal("22.5")
+    assert aggregates[0].offer_count == 3

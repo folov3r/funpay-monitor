@@ -176,3 +176,38 @@ async def test_run_category_by_id_returns_none_for_missing(
     monitoring = MonitoringService(FakeParser(result=parsed_result([])), session_factory)
 
     assert await monitoring.run_category_by_id(999999) is None
+
+
+async def test_import_category_persists_unknown_category(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    parser = FakeParser(
+        result=parsed_result(
+            [
+                parsed_offer(server_id=1, server_name="EU", price=Decimal("10")),
+                parsed_offer(server_id=2, server_name="NA", price=Decimal("20")),
+            ]
+        )
+    )
+    monitoring = MonitoringService(parser, session_factory)
+
+    imported = await monitoring.import_category("/chips/30/")
+
+    assert imported.title == "Серебро Albion Online"
+    assert imported.url_path == "/chips/30/"
+    assert imported.offers_found == 2
+    assert imported.snapshots_created == 2
+
+    async with session_factory() as session:
+        category = await session.get(Category, imported.category_id)
+        offers = list(await session.scalars(select(Offer)))
+        snapshots = list(await session.scalars(select(PriceSnapshot)))
+        run = await session.scalar(select(ParseRun))
+
+    assert category is not None
+    assert category.last_parsed_at is not None
+    assert len(offers) == 2
+    assert len(snapshots) == 2
+    assert run is not None
+    assert run.status == "ok"
+    assert run.offers_found == 2

@@ -46,6 +46,17 @@ class ParseOutcome:
     error_text: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ImportedCategory:
+    """A category parsed on demand by the bot during the /add dialog."""
+
+    category_id: int
+    title: str
+    url_path: str
+    offers_found: int
+    snapshots_created: int
+
+
 class MonitoringService:
     """Run the parse → persist → snapshot pipeline for tracked categories."""
 
@@ -84,6 +95,53 @@ class MonitoringService:
             )
 
         return await self.run_category(ref)
+
+    async def import_category(self, url_path: str) -> ImportedCategory:
+        """Parse a URL on demand and persist it so the user can subscribe immediately.
+
+        Unlike the scheduled pipeline this creates the category row from the
+        parsed page before opening the parse run, so the bot can offer servers
+        for a category the worker has never seen before.
+        """
+        parsed = await self._parser.fetch_category(url_path)
+        status = PARSE_RUN_OK if parsed.offers else PARSE_RUN_ERROR
+        error_text = (
+            None if parsed.offers else "no offers found (possible markup change or bot protection)"
+        )
+
+        async with self._session_factory() as session:
+            category = await get_or_create_category(session, parsed.category)
+            category_id = category.id
+            title = category.title
+            stored_path = category.url_path
+
+            run = await start_parse_run(session, category_id)
+            servers = await upsert_servers(session, category_id, parsed.offers)
+            await replace_offers(session, category_id, parsed.offers, servers)
+            snapshots = await add_price_snapshots(session, category_id, parsed.offers, servers)
+            category.last_parsed_at = datetime.now(UTC)
+            await finish_parse_run(
+                session,
+                run,
+                status=status,
+                offers_found=len(parsed.offers),
+                error_text=error_text,
+            )
+            await session.commit()
+
+        logger.info(
+            "Imported %s on demand: %s offers, %s snapshots",
+            stored_path,
+            len(parsed.offers),
+            len(snapshots),
+        )
+        return ImportedCategory(
+            category_id=category_id,
+            title=title,
+            url_path=stored_path,
+            offers_found=len(parsed.offers),
+            snapshots_created=len(snapshots),
+        )
 
     async def run_category(self, category: CategoryRef) -> ParseOutcome:
         """Parse one category and persist the result or the failure."""
