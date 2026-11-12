@@ -12,4 +12,7 @@ COPY app ./app
 
 RUN pip install --upgrade pip && pip install .
 
+COPY alembic.ini ./
+COPY alembic ./alembic
+
 CMD ["python", "-m", "app.main"]

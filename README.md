@@ -24,10 +24,10 @@ Python 3.12 · vkbottle · SQLAlchemy 2.0 (async) · PostgreSQL 16 · Alembic ·
 
 ```bash
 cp .env.example .env
-docker compose up -d db
+docker compose up --build -d
 ```
 
-`bot` и `worker` пока запускаются как заглушки: бот подключится к VK на второй неделе.
+Сервис `migrate` применит миграции Alembic, после чего стартуют `bot` и `worker` (пока это заглушки: бот подключится к VK на второй неделе).
 
 ### Локально
 
@@ -35,6 +35,9 @@ docker compose up -d db
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+
+docker compose up -d db   # PostgreSQL для локальной разработки
+alembic upgrade head     # применить миграции
 
 pytest          # тесты
 ruff check .    # линтер
@@ -70,6 +73,7 @@ app/
   config.py   # настройки из .env
   main.py     # entrypoint бота
   worker.py   # entrypoint воркера
+alembic/      # миграции схемы БД
 tests/        # pytest, HTML-фикстуры
 docs/         # MkDocs (позже)
 ```

@@ -18,6 +18,19 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    build: .
+    restart: "no"
+    command: alembic upgrade head
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-funpay}:${POSTGRES_PASSWORD:-funpay}@db:5432/${POSTGRES_DB:-funpay}
+    depends_on:
+      db:
+        condition: service_healthy
+
   bot:
     build: .
     restart: unless-stopped
@@ -28,8 +41,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-funpay}:${POSTGRES_PASSWORD:-funpay}@db:5432/${POSTGRES_DB:-funpay}
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     build: .
@@ -41,8 +54,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-funpay}:${POSTGRES_PASSWORD:-funpay}@db:5432/${POSTGRES_DB:-funpay}
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
