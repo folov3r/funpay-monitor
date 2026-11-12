@@ -143,6 +143,30 @@ async def add_price_snapshots(
     return snapshots
 
 
+async def list_price_snapshots(
+    session: AsyncSession,
+    category_id: int,
+    *,
+    server_id: int | None = None,
+    since: datetime | None = None,
+    limit: int | None = None,
+) -> list[PriceSnapshot]:
+    """Return snapshots oldest-first, optionally filtered by server and period."""
+    statement = select(PriceSnapshot).where(PriceSnapshot.category_id == category_id)
+    if server_id is not None:
+        statement = statement.where(PriceSnapshot.server_id == server_id)
+    if since is not None:
+        statement = statement.where(PriceSnapshot.captured_at >= since)
+
+    statement = statement.order_by(PriceSnapshot.captured_at.desc())
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    rows = list(await session.scalars(statement))
+    rows.reverse()
+    return rows
+
+
 async def start_parse_run(session: AsyncSession, category_id: int) -> ParseRun:
     """Open a parse run before hitting the network, so failures are recorded."""
     run = ParseRun(category_id=category_id, status=PARSE_RUN_RUNNING)

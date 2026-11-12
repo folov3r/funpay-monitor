@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.db.models import Offer, ParseRun, PriceSnapshot, Server
@@ -10,6 +11,7 @@ from app.db.repositories import (
     get_category_by_path,
     get_or_create_category,
     list_active_categories,
+    list_price_snapshots,
     replace_offers,
     start_parse_run,
     upsert_servers,
@@ -188,3 +190,75 @@ async def test_servers_are_reused_between_runs(
     async with session_factory() as session:
         rows = list(await session.scalars(select(Server)))
     assert len(rows) == 1
+
+
+async def test_list_price_snapshots_filters_and_orders(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+
+    async with session_factory() as session:
+        category = await get_or_create_category(session, INFO)
+        servers = await upsert_servers(
+            session,
+            category.id,
+            [
+                parsed_offer(server_id=1, server_name="EU"),
+                parsed_offer(server_id=2, server_name="NA"),
+            ],
+        )
+        eu_id = servers[1].id
+        na_id = servers[2].id
+        session.add_all(
+            [
+                PriceSnapshot(
+                    category_id=category.id,
+                    server_id=eu_id,
+                    min_price=Decimal("10"),
+                    median_price=Decimal("11"),
+                    offer_count=1,
+                    captured_at=start + timedelta(days=1),
+                ),
+                PriceSnapshot(
+                    category_id=category.id,
+                    server_id=na_id,
+                    min_price=Decimal("20"),
+                    median_price=Decimal("21"),
+                    offer_count=1,
+                    captured_at=start + timedelta(days=2),
+                ),
+                PriceSnapshot(
+                    category_id=category.id,
+                    server_id=eu_id,
+                    min_price=Decimal("12"),
+                    median_price=Decimal("13"),
+                    offer_count=1,
+                    captured_at=start + timedelta(days=3),
+                ),
+            ]
+        )
+        await session.commit()
+        category_id = category.id
+
+    async with session_factory() as session:
+        all_rows = await list_price_snapshots(session, category_id)
+        eu_rows = await list_price_snapshots(session, category_id, server_id=eu_id)
+        since_rows = await list_price_snapshots(
+            session, category_id, since=start + timedelta(days=2)
+        )
+        limited_rows = await list_price_snapshots(session, category_id, limit=2)
+
+    assert [row.captured_at for row in all_rows] == [
+        start + timedelta(days=1),
+        start + timedelta(days=2),
+        start + timedelta(days=3),
+    ]
+    assert [row.min_price for row in eu_rows] == [Decimal("10"), Decimal("12")]
+    assert [row.captured_at for row in since_rows] == [
+        start + timedelta(days=2),
+        start + timedelta(days=3),
+    ]
+    assert [row.captured_at for row in limited_rows] == [
+        start + timedelta(days=2),
+        start + timedelta(days=3),
+    ]
