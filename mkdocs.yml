@@ -27,4 +27,5 @@ nav:
   - Развёртывание: deployment.md
   - Ограничения: limitations.md
   - Презентация: presentation.md
+  - QA-чеклист: qa-checklist.md
   - Changelog: changelog.md
