@@ -6,14 +6,14 @@ import asyncio
 import contextlib
 import logging
 import signal
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from vkbottle.bot import Bot
 
 from app.config import get_settings
 from app.db.base import build_engine, build_session_factory
-from app.db.repositories import PARSE_RUN_OK
+from app.db.repositories import PARSE_RUN_OK, fail_stale_parse_runs
 from app.logging import setup_logging
 from app.parsers.funpay import FunPayParser
 from app.services.alert_notifier import VkAlertNotifier
@@ -34,6 +34,15 @@ async def run() -> None:
     session_factory = build_session_factory(engine)
     parser = FunPayParser()
     monitoring = MonitoringService(parser, session_factory)
+
+    async with session_factory() as session:
+        stale = await fail_stale_parse_runs(
+            session,
+            older_than=datetime.now(UTC) - timedelta(hours=1),
+        )
+        await session.commit()
+    if stale:
+        logger.warning("Marked %s stale parse runs as failed", stale)
 
     bot: Bot | None = None
     alerts: AlertService | None = None

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from statistics import median
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -665,3 +665,24 @@ async def list_recent_parse_runs(
         )
         for run, title, url_path in rows
     ]
+
+
+async def fail_stale_parse_runs(
+    session: AsyncSession,
+    *,
+    older_than: datetime,
+) -> int:
+    """Mark runs stuck in ``running`` as failed after a worker restart."""
+    result = await session.execute(
+        update(ParseRun)
+        .where(
+            ParseRun.status == PARSE_RUN_RUNNING,
+            ParseRun.started_at < older_than,
+        )
+        .values(
+            status=PARSE_RUN_ERROR,
+            finished_at=datetime.now(UTC),
+            error_text="interrupted by worker restart",
+        )
+    )
+    return int(result.rowcount or 0)

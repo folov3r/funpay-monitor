@@ -45,7 +45,7 @@ async def test_notifier_sends_text_without_chart() -> None:
 
     call = api.messages.calls[0]
     assert call["peer_id"] == 777
-    assert "Цена упала до 90,00 ₽" in call["message"]
+    assert "Цена ниже порога: 90,00 ₽" in call["message"]
     assert call["attachment"] is None
     assert 0 < call["random_id"] < 2**31
 

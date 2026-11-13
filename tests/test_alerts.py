@@ -89,7 +89,7 @@ def test_format_alert_text_abs() -> None:
     text = format_alert_text(make_alert())
 
     assert "Серебро · EU" in text
-    assert "Цена упала до 90,00 ₽ — ниже порога 100,00 ₽." in text
+    assert "Цена ниже порога: 90,00 ₽ (порог 100,00 ₽)." in text
     assert "Было: 120,00 ₽." in text
     assert "Подписка #3" in text
 

@@ -4,12 +4,14 @@ from decimal import Decimal
 
 from app.db.models import Offer, ParseRun, PriceSnapshot, Server
 from app.db.repositories import (
+    PARSE_RUN_ERROR,
     PARSE_RUN_OK,
     PARSE_RUN_RUNNING,
     add_price_snapshots,
     count_active_subscriptions,
     current_price_summary,
     deactivate_subscription,
+    fail_stale_parse_runs,
     finish_parse_run,
     get_category_by_path,
     get_or_create_category,
@@ -400,3 +402,37 @@ async def test_current_price_summary_and_aggregation(
     assert aggregates[0].min_price == Decimal("10")
     assert aggregates[0].median_price == Decimal("22.5")
     assert aggregates[0].offer_count == 3
+
+
+async def test_fail_stale_parse_runs(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime.now(UTC)
+    async with session_factory() as session:
+        category = await get_or_create_category(session, INFO)
+        stale = await start_parse_run(session, category.id)
+        stale.started_at = now - timedelta(hours=3)
+        fresh = await start_parse_run(session, category.id)
+        fresh.started_at = now - timedelta(minutes=5)
+        await session.commit()
+        stale_id = stale.id
+        fresh_id = fresh.id
+
+    async with session_factory() as session:
+        count = await fail_stale_parse_runs(
+            session,
+            older_than=now - timedelta(hours=1),
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        stale_row = await session.get(ParseRun, stale_id)
+        fresh_row = await session.get(ParseRun, fresh_id)
+
+    assert count == 1
+    assert stale_row is not None
+    assert stale_row.status == PARSE_RUN_ERROR
+    assert stale_row.finished_at is not None
+    assert stale_row.error_text == "interrupted by worker restart"
+    assert fresh_row is not None
+    assert fresh_row.status == PARSE_RUN_RUNNING

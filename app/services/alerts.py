@@ -91,8 +91,8 @@ def format_alert_text(alert: PendingAlert) -> str:
     lines = [title]
     if alert.mode == "abs":
         lines.append(
-            f"Цена упала до {format_money(alert.price)} — "
-            f"ниже порога {format_money(alert.threshold)}."
+            f"Цена ниже порога: {format_money(alert.price)} "
+            f"(порог {format_money(alert.threshold)})."
         )
     elif alert.mode == "pct":
         previous = alert.previous_price
