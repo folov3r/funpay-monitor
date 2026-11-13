@@ -34,3 +34,6 @@ htmlcov/
 # Local data
 *.sqlite3
 pgdata/
+
+# Docs build
+site/

@@ -1,0 +1,29 @@
+site_name: FunPay Monitor
+site_description: VK-бот для мониторинга цен на FunPay
+docs_dir: docs
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+nav:
+  - Обзор: index.md
+  - Быстрый старт: quickstart.md
+  - Архитектура: architecture.md
+  - Модель данных: data-model.md
+  - Парсер FunPay: parser.md
+  - Воркер: worker.md
+  - Команды бота: bot.md
+  - Алерты: alerts.md
+  - Тестирование: testing.md
+  - Развёртывание: deployment.md
+  - Ограничения: limitations.md
+  - Changelog: changelog.md

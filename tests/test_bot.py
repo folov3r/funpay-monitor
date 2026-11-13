@@ -58,6 +58,17 @@ def test_create_bot_registers_user_middleware() -> None:
     assert bot.labeler.message_view.middlewares[0].__name__ == "UserMiddleware"
 
 
+def test_admin_handlers_run_before_link_handler() -> None:
+    bot = make_bot()
+    names = [
+        handler.handler.__name__
+        for handler in bot.labeler.message_view.handlers
+        if hasattr(handler, "handler")
+    ]
+
+    assert names.index("admin_reparse_handler") < names.index("link_handler")
+
+
 def test_add_states_are_distinct() -> None:
     states = {
         AddSubscriptionStates.WAITING_LINK,

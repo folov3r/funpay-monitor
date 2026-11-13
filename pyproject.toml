@@ -30,6 +30,9 @@ dev = [
     "respx>=0.21",
     "ruff>=0.4",
 ]
+docs = [
+    "mkdocs-material>=9.5",
+]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
