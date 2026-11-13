@@ -15,15 +15,20 @@ from app.bot.keyboards import (
     ANY_SERVER_LABEL,
     cancel_keyboard,
     confirm_keyboard,
+    item_types_keyboard,
     main_menu_keyboard,
     modes_keyboard,
+    query_keyboard,
     servers_keyboard,
     subscriptions_keyboard,
 )
 from app.bot.states import AddSubscriptionStates
 from app.bot.texts import (
+    QUERY_PROMPT,
     extract_category_path,
     format_condition,
+    format_item_type,
+    format_offer_filter,
     format_server_name,
     format_stats_text,
     format_subscription_list,
@@ -32,7 +37,9 @@ from app.bot.texts import (
     is_list_command,
     is_stats_command,
     is_unsubscribe_command,
+    item_type_from_label,
     mode_from_label,
+    normalize_query,
     normalize_text,
     parse_subscription_id,
     parse_threshold,
@@ -108,28 +115,66 @@ async def _import_category(
 
     async with services.session_factory() as session:
         servers = await list_servers(session, imported.category_id)
-    options = _server_options(servers)
-
-    if not options:
-        payload = {
-            "category_id": imported.category_id,
-            "category_title": imported.title,
-            "url_path": imported.url_path,
-            "servers": [],
-        }
-        await message.answer(
-            f"Категория «{imported.title}»: {imported.offers_found} офферов. "
-            "Серверы не нашлись, поэтому подписка будет на любой сервер."
-        )
-        await _ask_mode(bot, message, payload, server_id=None, server_name="любой сервер")
-        return
 
     payload = {
         "category_id": imported.category_id,
         "category_title": imported.title,
         "url_path": imported.url_path,
-        "servers": options,
+        "offers_found": imported.offers_found,
+        "servers": _server_options(servers),
+        "item_types": list(imported.item_types),
     }
+    await message.answer(f"Категория «{imported.title}»: {imported.offers_found} офферов.")
+
+    if imported.item_types:
+        await _ask_item_type(bot, message, payload)
+    else:
+        await _ask_server(bot, message, payload)
+
+
+async def _ask_item_type(
+    bot: Bot,
+    message: Message,
+    payload: dict[str, Any],
+) -> None:
+    await bot.state_dispenser.set(
+        message.peer_id,
+        AddSubscriptionStates.WAITING_ITEM_TYPE,
+        **_state_kwargs(payload),
+    )
+    labels = [
+        format_item_type(item_type) or item_type for item_type in payload.get("item_types") or []
+    ]
+    await message.answer(
+        "Что отслеживать? Выберите тип предложений:",
+        keyboard=item_types_keyboard(labels),
+    )
+
+
+async def _ask_query(
+    bot: Bot,
+    message: Message,
+    payload: dict[str, Any],
+) -> None:
+    await bot.state_dispenser.set(
+        message.peer_id,
+        AddSubscriptionStates.WAITING_QUERY,
+        **_state_kwargs(payload),
+    )
+    await message.answer(QUERY_PROMPT, keyboard=query_keyboard())
+
+
+async def _ask_server(
+    bot: Bot,
+    message: Message,
+    payload: dict[str, Any],
+) -> None:
+    options = payload.get("servers") or []
+    if not options:
+        await message.answer("Серверы не нашлись, поэтому подписка будет на любой сервер.")
+        await _ask_mode(bot, message, payload, server_id=None, server_name="любой сервер")
+        return
+
     await bot.state_dispenser.set(
         message.peer_id,
         AddSubscriptionStates.WAITING_SERVER,
@@ -137,7 +182,6 @@ async def _import_category(
     )
     names = [option["name"] for option in options]
     await message.answer(
-        f"Категория «{imported.title}»: {imported.offers_found} офферов.\n"
         "Выберите сервер (можно прислать название текстом):",
         keyboard=servers_keyboard(names),
     )
@@ -178,6 +222,15 @@ async def _ask_confirm(
     condition = format_condition(mode, threshold)
     server_name = str(payload.get("server_name") or "любой сервер")
     title = str(payload.get("category_title") or "категория")
+    filter_label = format_offer_filter(
+        payload.get("item_type"),
+        payload.get("query"),
+    )
+
+    lines = [f"Проверьте подписку:\n\n{title}"]
+    if filter_label:
+        lines.append(f"Фильтр: {filter_label}")
+    lines.extend([f"Сервер: {server_name}", f"Условие: {condition}"])
 
     await bot.state_dispenser.set(
         message.peer_id,
@@ -185,7 +238,7 @@ async def _ask_confirm(
         **_state_kwargs(payload),
     )
     await message.answer(
-        f"Проверьте подписку:\n\n{title}\nСервер: {server_name}\nУсловие: {condition}",
+        "\n".join(lines),
         keyboard=confirm_keyboard(),
     )
 
@@ -202,6 +255,8 @@ async def _send_subscription_list(
                 session,
                 subscription.category_id,
                 subscription.server_id,
+                item_type=subscription.item_type,
+                query=subscription.query,
             )
             for subscription in subscriptions
         }
@@ -293,6 +348,29 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
             )
             return
         await _import_category(bot, message, services, path)
+
+    @bot.on.message(state=AddSubscriptionStates.WAITING_ITEM_TYPE)
+    async def waiting_item_type_handler(message: Message, user_id: int) -> None:
+        payload = _payload(message)
+        available = payload.get("item_types") or []
+        matched, item_type = item_type_from_label(message.text, available)
+        if not matched:
+            labels = [format_item_type(value) or value for value in available]
+            await message.answer(
+                "Выберите тип кнопкой.",
+                keyboard=item_types_keyboard(labels),
+            )
+            return
+        await _ask_query(bot, message, {**payload, "item_type": item_type})
+
+    @bot.on.message(state=AddSubscriptionStates.WAITING_QUERY)
+    async def waiting_query_handler(message: Message, user_id: int) -> None:
+        payload = _payload(message)
+        await _ask_server(
+            bot,
+            message,
+            {**payload, "query": normalize_query(message.text)},
+        )
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_SERVER)
     async def waiting_server_handler(message: Message, user_id: int) -> None:
@@ -407,6 +485,8 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
                 server_id=payload.get("server_id"),
                 mode=str(mode),
                 threshold=threshold,
+                item_type=payload.get("item_type"),
+                query=payload.get("query"),
             )
             await session.commit()
             subscription_id = subscription.id
@@ -441,11 +521,15 @@ async def _send_stats(
             session,
             subscription.category_id,
             subscription.server_id,
+            item_type=subscription.item_type,
+            query=subscription.query,
         )
         if subscription.server_id is None:
             aggregates = await list_aggregated_snapshots(
                 session,
                 subscription.category_id,
+                item_type=subscription.item_type,
+                query=subscription.query,
                 since=since,
             )
             points = [
@@ -461,6 +545,8 @@ async def _send_stats(
                 session,
                 subscription.category_id,
                 server_id=subscription.server_id,
+                item_type=subscription.item_type,
+                query=subscription.query,
                 since=since,
             )
             points = [
@@ -482,9 +568,14 @@ async def _send_stats(
         await message.answer(text, keyboard=main_menu_keyboard())
         return
 
+    filter_label = format_offer_filter(subscription.item_type, subscription.query)
+    title_parts = [subscription.category.title]
+    if filter_label:
+        title_parts.append(filter_label)
+    title_parts.append(format_server_name(subscription))
     image = await render_price_chart_async(
         points,
-        title=f"{subscription.category.title} · {format_server_name(subscription)}",
+        title=" · ".join(title_parts),
     )
     try:
         attachment = await upload_message_photo(bot.api, message.peer_id, image)

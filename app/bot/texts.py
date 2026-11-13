@@ -11,7 +11,7 @@ from app.db.models import Subscription
 from app.db.repositories import PriceSummary
 from app.parsers.funpay import normalize_category_path
 from app.services.charts import ChartPoint
-from app.services.formatting import format_money
+from app.services.formatting import format_item_type, format_money, format_offer_filter
 
 FUNPAY_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?funpay\.com/(?:chips|lots)/\d+/?",
@@ -32,6 +32,13 @@ MODE_BY_LABEL = {
     "исторический минимум": "lowest",
     "минимум": "lowest",
 }
+
+ALL_ITEM_TYPES_LABEL = "Все"
+SKIP_QUERY_LABEL = "Пропустить"
+QUERY_PROMPT = (
+    "Введите часть названия предмета для поиска, например plush nessie, "
+    "или нажмите «Пропустить», чтобы следить за всеми предложениями выбранного типа."
+)
 
 WELCOME_TEXT = (
     "Привет! Я слежу за ценами на FunPay и присылаю уведомления, когда цена падает.\n\n"
@@ -131,6 +138,37 @@ def mode_from_label(text: str | None) -> str | None:
     return MODE_BY_LABEL.get(normalize_text(text))
 
 
+def item_type_from_label(text: str | None, available: Sequence[str]) -> tuple[bool, str | None]:
+    """Resolve a type button/text into a stored value.
+
+    Returns ``(matched, value)``. ``value=None`` means "all types" when the
+    text matched the «Все» label; ``matched=False`` means the input is invalid.
+    """
+    normalized = normalize_text(text)
+    if normalized in {normalize_text(ALL_ITEM_TYPES_LABEL), "все типы", "любой тип"}:
+        return True, None
+    for value in available:
+        label = format_item_type(value) or value
+        if normalized in {normalize_text(value), normalize_text(label)}:
+            return True, value
+    return False, None
+
+
+def normalize_query(text: str | None) -> str | None:
+    """Normalise a title search string, returning ``None`` for skip/empty."""
+    normalized = normalize_text(text)
+    if normalized in {"", normalize_text(SKIP_QUERY_LABEL), "пропустить", "нет"}:
+        return None
+    return normalized[:255]
+
+
+def format_subscription_filter(subscription: Subscription) -> str | None:
+    return format_offer_filter(
+        getattr(subscription, "item_type", None),
+        getattr(subscription, "query", None),
+    )
+
+
 def format_condition(mode: str, threshold: Decimal | None) -> str:
     """Describe an alert rule in human language."""
     if mode == "lowest":
@@ -158,11 +196,12 @@ def format_subscription_line(
     current = (
         f"сейчас {format_money(summary.min_price)}" if summary is not None else "нет данных о цене"
     )
-    return (
-        f"#{subscription.id} · {subscription.category.title}\n"
-        f"   {format_server_name(subscription)} · "
-        f"{format_threshold(subscription)} · {current}"
-    )
+    details = [format_server_name(subscription)]
+    filter_label = format_subscription_filter(subscription)
+    if filter_label:
+        details.insert(0, filter_label)
+    details.extend([format_threshold(subscription), current])
+    return f"#{subscription.id} · {subscription.category.title}\n   " + " · ".join(details)
 
 
 def format_subscription_list(
@@ -182,11 +221,16 @@ def format_stats_text(
     *,
     days: int = 7,
 ) -> str:
-    lines = [
-        f"#{subscription.id} · {subscription.category.title}",
-        f"Сервер: {format_server_name(subscription)}",
-        f"Условие: {format_threshold(subscription)}",
-    ]
+    lines = [f"#{subscription.id} · {subscription.category.title}"]
+    filter_label = format_subscription_filter(subscription)
+    if filter_label:
+        lines.append(f"Фильтр: {filter_label}")
+    lines.extend(
+        [
+            f"Сервер: {format_server_name(subscription)}",
+            f"Условие: {format_threshold(subscription)}",
+        ]
+    )
     if current is not None:
         lines.append(
             f"Сейчас: {format_money(current.min_price)} "

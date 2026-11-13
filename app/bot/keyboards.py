@@ -6,6 +6,8 @@ from collections.abc import Sequence
 
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
+from app.bot.texts import ALL_ITEM_TYPES_LABEL, SKIP_QUERY_LABEL
+
 ANY_SERVER_LABEL = "Любой"
 CANCEL_LABEL = "Отмена"
 
@@ -40,6 +42,28 @@ def servers_keyboard(server_names: Sequence[str]) -> Keyboard:
     keyboard.add(Text(ANY_SERVER_LABEL), color=KeyboardButtonColor.PRIMARY)
     keyboard.add(Text(CANCEL_LABEL), color=KeyboardButtonColor.NEGATIVE)
     return keyboard
+
+
+def item_types_keyboard(labels: Sequence[str]) -> Keyboard:
+    """Inline keyboard with «Все» and every offer type found on the page."""
+    keyboard = Keyboard(one_time=False, inline=True)
+    keyboard.add(Text(ALL_ITEM_TYPES_LABEL), color=KeyboardButtonColor.PRIMARY)
+    for index, label in enumerate(labels):
+        keyboard.add(Text(label))
+        if index % 2 == 1:
+            keyboard.row()
+    if len(labels) % 2 == 1:
+        keyboard.row()
+    keyboard.add(Text(CANCEL_LABEL), color=KeyboardButtonColor.NEGATIVE)
+    return keyboard
+
+
+def query_keyboard() -> Keyboard:
+    return (
+        Keyboard(one_time=False, inline=True)
+        .add(Text(SKIP_QUERY_LABEL), color=KeyboardButtonColor.PRIMARY)
+        .add(Text(CANCEL_LABEL), color=KeyboardButtonColor.NEGATIVE)
+    )
 
 
 def cancel_keyboard() -> Keyboard:

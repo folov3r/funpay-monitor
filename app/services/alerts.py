@@ -15,6 +15,7 @@ from app.db.repositories import (
     add_notification,
     historical_min_price,
     last_notification_at,
+    latest_category_captured_at,
     latest_snapshot_point,
     list_aggregated_snapshots,
     list_category_subscriptions,
@@ -22,7 +23,7 @@ from app.db.repositories import (
     previous_snapshot_point,
 )
 from app.services.charts import ChartPoint, render_price_chart_async
-from app.services.formatting import format_money, format_percent
+from app.services.formatting import format_money, format_offer_filter, format_percent
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ class PendingAlert:
     previous_price: Decimal | None
     historical_min: Decimal | None
     snapshot_id: int
+    item_type: str | None = None
+    query: str | None = None
 
 
 class AlertNotifier(Protocol):
@@ -85,6 +88,9 @@ def percent_drop(current: Decimal, previous: Decimal) -> Decimal:
 def format_alert_text(alert: PendingAlert) -> str:
     """Build the Russian notification body sent to VK."""
     title = f"🔔 {alert.category_title}"
+    filter_label = format_offer_filter(alert.item_type, alert.query)
+    if filter_label:
+        title = f"{title} · {filter_label}"
     if alert.server_name and alert.server_name != "любой сервер":
         title = f"{title} · {alert.server_name}"
 
@@ -124,6 +130,7 @@ async def evaluate_category_alerts(
     """Return all active subscriptions of a category that must be notified."""
     moment = now or datetime.now(UTC)
     subscriptions = await list_category_subscriptions(session, category_id)
+    latest_run_at = await latest_category_captured_at(session, category_id)
     alerts: list[PendingAlert] = []
 
     for subscription in subscriptions:
@@ -131,8 +138,14 @@ async def evaluate_category_alerts(
             session,
             category_id,
             subscription.server_id,
+            item_type=subscription.item_type,
+            query=subscription.query,
         )
         if current is None:
+            continue
+        # A filtered slice may have no offers in the latest run. Do not alert
+        # on an old snapshot that is no longer part of the current run.
+        if latest_run_at is not None and current.captured_at < latest_run_at:
             continue
 
         last_sent = await last_notification_at(session, subscription.id)
@@ -144,12 +157,16 @@ async def evaluate_category_alerts(
             category_id,
             subscription.server_id,
             current.captured_at,
+            item_type=subscription.item_type,
+            query=subscription.query,
         )
         historical = await historical_min_price(
             session,
             category_id,
             subscription.server_id,
             current.captured_at,
+            item_type=subscription.item_type,
+            query=subscription.query,
         )
 
         if not alert_triggered(
@@ -177,6 +194,8 @@ async def evaluate_category_alerts(
                 previous_price=previous.min_price if previous is not None else None,
                 historical_min=historical,
                 snapshot_id=current.snapshot_id,
+                item_type=subscription.item_type,
+                query=subscription.query,
             )
         )
 
@@ -247,9 +266,14 @@ class AlertService:
                 points = await _load_chart_points(session, alert, since)
             if not points:
                 return None
+            filter_label = format_offer_filter(alert.item_type, alert.query)
+            title_parts = [alert.category_title]
+            if filter_label:
+                title_parts.append(filter_label)
+            title_parts.append(alert.server_name)
             return await render_price_chart_async(
                 points,
-                title=f"{alert.category_title} · {alert.server_name}",
+                title=" · ".join(title_parts),
             )
         except Exception:
             logger.exception("Could not render chart for alert #%s", alert.subscription_id)
@@ -265,6 +289,8 @@ async def _load_chart_points(
         aggregates = await list_aggregated_snapshots(
             session,
             alert.category_id,
+            item_type=alert.item_type,
+            query=alert.query,
             since=since,
         )
         return [
@@ -280,6 +306,8 @@ async def _load_chart_points(
         session,
         alert.category_id,
         server_id=alert.server_id,
+        item_type=alert.item_type,
+        query=alert.query,
         since=since,
     )
     return [
