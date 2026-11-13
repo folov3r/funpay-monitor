@@ -144,6 +144,40 @@ def _text(node: Tag | None) -> str:
     return WHITESPACE_RE.sub(" ", node.get_text(" ", strip=True)).strip()
 
 
+def _attr_text(node: Tag, name: str) -> str | None:
+    """Read a whitespace-normalised string attribute from a tag."""
+    raw = node.get(name)
+    if isinstance(raw, list):
+        raw = " ".join(str(part) for part in raw)
+    if not isinstance(raw, str):
+        return None
+    value = WHITESPACE_RE.sub(" ", raw).strip()
+    return value or None
+
+
+def _parse_price(price_node: Tag) -> tuple[Decimal | None, str]:
+    """Return the exact price and the displayed price text.
+
+    FunPay stores the unrounded value in ``data-s`` and rounds the visible
+    price to two decimals (or five for cheap offers). ``data-s`` is used only
+    when it agrees with the visible price, so synthetic or legacy markup with
+    unrelated ``data-s`` values still falls back to the text.
+    """
+    price_value_node = price_node.find("div", recursive=False) or price_node
+    price_text = _text(price_value_node)
+    displayed = parse_decimal(price_text)
+
+    raw_exact = price_node.get("data-s")
+    exact = parse_decimal(raw_exact) if isinstance(raw_exact, str) else None
+    if exact is not None and exact > 0:
+        if displayed is None or displayed <= 0:
+            return exact, price_text
+        tolerance = max(Decimal("0.01"), displayed * Decimal("0.001"))
+        if abs(exact - displayed) <= tolerance:
+            return exact, price_text
+    return displayed, price_text
+
+
 def _parse_server(item: Tag) -> tuple[int, str]:
     raw_id = item.get("data-server")
     server_id = 0
@@ -183,9 +217,7 @@ def _parse_offer(item: Tag) -> Offer | None:
         return None
 
     # The first nested div holds the actual price; extra divs may hold promo icons.
-    price_value_node = price_node.find("div", recursive=False) or price_node
-    price_text = _text(price_value_node)
-    price = parse_decimal(price_text)
+    price, price_text = _parse_price(price_node)
     if price is None or price <= 0:
         logger.warning("Offer with unparsable price %r skipped: %s", price_text, item.get("href"))
         return None
@@ -196,6 +228,9 @@ def _parse_offer(item: Tag) -> Offer | None:
     server_id, server_name = _parse_server(item)
     classes = item.get("class") or []
     is_online = item.get("data-online") == "1" or item.select_one(".media-user.online") is not None
+    item_type = _attr_text(item, "data-f-type")
+    method = _attr_text(item, "data-f-method")
+    title = _text(item.select_one(".tc-desc-text")) or None
 
     return Offer(
         seller_id=_parse_seller_id(item),
@@ -207,6 +242,9 @@ def _parse_offer(item: Tag) -> Offer | None:
         server_name=server_name,
         is_online=is_online,
         is_promo="offer-promo" in classes,
+        item_type=item_type.casefold() if item_type else None,
+        method=method.casefold() if method else None,
+        title=title,
     )
 
 

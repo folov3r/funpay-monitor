@@ -136,7 +136,7 @@ def test_parse_lots_fixture(parser: FunPayParser) -> None:
     assert any_server.server_id == 0
     assert any_server.server_name == "Любой"
     assert any_server.amount is None
-    assert any_server.price == Decimal("117.11")
+    assert any_server.price == Decimal("117.107943")
     assert any_server.seller_id == 445652
     assert any_server.is_promo is True
 
@@ -144,12 +144,41 @@ def test_parse_lots_fixture(parser: FunPayParser) -> None:
     assert kazzak.server_id == 1840
     assert kazzak.server_name == "Kazzak"
     assert kazzak.seller_id == 18683964
-    assert kazzak.price == Decimal("2108")
+    assert kazzak.price == Decimal("2107.942974")
     assert kazzak.is_online is True
 
     assert parsed.offers[2].is_online is False
-    assert parsed.min_price == Decimal("117.11")
-    assert parsed.median_price == Decimal("2108")
+    assert parsed.min_price == Decimal("117.107943")
+    assert parsed.median_price == Decimal("2107.942974")
+
+
+def test_parse_offer_item_type_method_and_exact_price(parser: FunPayParser) -> None:
+    html = """
+    <html><body>
+    <h1>Fisch Roblox</h1>
+    <a class="tc-item" data-f-type="Предметы" data-f-method="Трейд"
+       data-server="*" data-online="1" data-user="42"
+       href="https://funpay.com/lots/offer?id=1">
+      <div class="tc-desc">
+        <div class="tc-desc-text">plush nessie, Предметы, Трейд</div>
+      </div>
+      <div class="media-user-name">Vaqe</div>
+      <div class="tc-price" data-s="595.723014">
+        <div>595.72 <span class="unit">₽</span></div>
+      </div>
+    </a>
+    </body></html>
+    """
+
+    parsed = parser.parse_html(html, "/lots/2932/")
+
+    assert len(parsed.offers) == 1
+    offer = parsed.offers[0]
+    assert offer.item_type == "предметы"
+    assert offer.method == "трейд"
+    assert offer.title == "plush nessie, Предметы, Трейд"
+    assert offer.price == Decimal("595.723014")
+    assert parsed.item_types == ("предметы",)
 
 
 def test_parse_empty_category(parser: FunPayParser) -> None:

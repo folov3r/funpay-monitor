@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal
 from statistics import median
@@ -28,6 +29,9 @@ class Offer:
     server_name: str
     is_online: bool = False
     is_promo: bool = False
+    item_type: str | None = None
+    method: str | None = None
+    title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +63,12 @@ class ParsedCategory:
         if not self.offers:
             return None
         return median(offer.price for offer in self.offers)
+
+    @property
+    def item_types(self) -> tuple[str, ...]:
+        """Offer types found on the page, most frequent first."""
+        counts = Counter(offer.item_type for offer in self.offers if offer.item_type)
+        return tuple(item_type for item_type, _ in counts.most_common())
 
 
 class BaseParser(ABC):
