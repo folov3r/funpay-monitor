@@ -24,7 +24,8 @@ async def main() -> int:
 
     api = API(settings.vk_group_token)
     try:
-        groups = await api.groups.get_by_id(group_id=settings.vk_group_id)
+        response = await api.groups.get_by_id(group_id=settings.vk_group_id)
+        groups = getattr(response, "groups", None) or []
         if groups:
             group = groups[0]
             print(f"Community: {group.name} (id {group.id})")

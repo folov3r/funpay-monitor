@@ -28,6 +28,9 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
+> Реальные значения пишите в `.env`. `.env.example` — шаблон в git, его нельзя
+> заполнять токенами.
+
 Сервис `migrate` применит миграции Alembic, после чего стартуют бот (Long Poll)
 и воркер (планировщик парсинга). Для бота нужен `VK_GROUP_TOKEN` в `.env`.
 
