@@ -90,6 +90,7 @@ class Offer(Base):
     __tablename__ = "offers"
     __table_args__ = (
         Index("ix_offers_category_server_price", "category_id", "server_id", "price"),
+        Index("ix_offers_category_type_price", "category_id", "item_type", "price"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -102,8 +103,11 @@ class Offer(Base):
     seller_id: Mapped[int | None] = mapped_column(BigInteger)
     seller_name: Mapped[str | None] = mapped_column(String(255))
     amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
-    price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     currency: Mapped[str] = mapped_column(String(8), server_default="RUB", nullable=False)
+    item_type: Mapped[str | None] = mapped_column(String(64))
+    method: Mapped[str | None] = mapped_column(String(64))
+    title: Mapped[str | None] = mapped_column(Text)
     is_online: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     is_promo: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     parsed_at: Mapped[datetime] = mapped_column(
@@ -116,7 +120,14 @@ class PriceSnapshot(Base):
 
     __tablename__ = "price_snapshots"
     __table_args__ = (
-        Index("ix_price_snapshots_category_server_time", "category_id", "server_id", "captured_at"),
+        Index(
+            "ix_price_snapshots_category_server_time",
+            "category_id",
+            "server_id",
+            "item_type",
+            "query",
+            "captured_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -126,9 +137,11 @@ class PriceSnapshot(Base):
     server_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
     )
-    min_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    median_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    min_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    median_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     offer_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_type: Mapped[str | None] = mapped_column(String(64))
+    query: Mapped[str | None] = mapped_column(String(255))
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -168,8 +181,10 @@ class Subscription(Base):
     server_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("servers.id", ondelete="SET NULL")
     )
+    item_type: Mapped[str | None] = mapped_column(String(64))
+    query: Mapped[str | None] = mapped_column(String(255))
     mode: Mapped[str] = mapped_column(String(16), nullable=False)  # 'abs' | 'pct' | 'lowest'
-    threshold: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    threshold: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -199,7 +214,7 @@ class Notification(Base):
     sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     reason: Mapped[str] = mapped_column(String(16), nullable=False)  # 'abs' | 'pct' | 'lowest'
 
     subscription: Mapped[Subscription] = relationship(back_populates="notifications")

@@ -17,6 +17,7 @@ from app.db.repositories import (
     finish_parse_run,
     get_or_create_category,
     list_active_categories,
+    list_category_snapshot_filters,
     replace_offers,
     start_parse_run,
     upsert_servers,
@@ -56,6 +57,7 @@ class ImportedCategory:
     url_path: str
     offers_found: int
     snapshots_created: int
+    item_types: tuple[str, ...] = ()
 
 
 class MonitoringService:
@@ -129,7 +131,14 @@ class MonitoringService:
             run = await start_parse_run(session, category_id)
             servers = await upsert_servers(session, category_id, parsed.offers)
             await replace_offers(session, category_id, parsed.offers, servers)
-            snapshots = await add_price_snapshots(session, category_id, parsed.offers, servers)
+            filters = await list_category_snapshot_filters(session, category_id)
+            snapshots = await add_price_snapshots(
+                session,
+                category_id,
+                parsed.offers,
+                servers,
+                filters,
+            )
             category.last_parsed_at = datetime.now(UTC)
             await finish_parse_run(
                 session,
@@ -152,6 +161,7 @@ class MonitoringService:
             url_path=stored_path,
             offers_found=len(parsed.offers),
             snapshots_created=len(snapshots),
+            item_types=parsed.item_types,
         )
 
     async def run_category(self, category: CategoryRef) -> ParseOutcome:
@@ -254,7 +264,14 @@ class MonitoringService:
             category = await get_or_create_category(session, parsed.category)
             servers = await upsert_servers(session, category.id, parsed.offers)
             await replace_offers(session, category.id, parsed.offers, servers)
-            snapshots = await add_price_snapshots(session, category.id, parsed.offers, servers)
+            filters = await list_category_snapshot_filters(session, category.id)
+            snapshots = await add_price_snapshots(
+                session,
+                category.id,
+                parsed.offers,
+                servers,
+                filters,
+            )
             category.last_parsed_at = datetime.now(UTC)
             await finish_parse_run(
                 session,

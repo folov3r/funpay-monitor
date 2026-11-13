@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -29,6 +30,20 @@ PARSE_RUN_RUNNING = "running"
 PARSE_RUN_OK = "ok"
 PARSE_RUN_ERROR = "error"
 PARSE_RUN_PARTIAL = "partial"
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotFilter:
+    """One offer slice that needs its own price history.
+
+    ``server_id`` is the database id of the server, or ``None`` for "any
+    server". ``item_type`` and ``query`` are the optional user filters; their
+    ``None`` values are meaningful and match unfiltered snapshots.
+    """
+
+    server_id: int | None
+    item_type: str | None = None
+    query: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +169,13 @@ async def upsert_servers(
     return servers
 
 
+def _offer_matches(offer: ParsedOffer, item_type: str | None, query: str | None) -> bool:
+    """Return whether an offer belongs to the requested type/title slice."""
+    if item_type is not None and (offer.item_type or "").casefold() != item_type.casefold():
+        return False
+    return query is None or query.casefold() in (offer.title or "").casefold()
+
+
 async def replace_offers(
     session: AsyncSession,
     category_id: int,
@@ -172,6 +194,9 @@ async def replace_offers(
             amount=offer.amount,
             price=offer.price,
             currency=offer.currency,
+            item_type=offer.item_type,
+            method=offer.method,
+            title=offer.title,
             is_online=offer.is_online,
             is_promo=offer.is_promo,
         )
@@ -187,23 +212,81 @@ async def add_price_snapshots(
     category_id: int,
     offers: list[ParsedOffer],
     servers: dict[int, Server],
+    filters: Iterable[SnapshotFilter] = (),
 ) -> list[PriceSnapshot]:
-    """Write one min/median/count snapshot per server that has offers."""
-    prices_by_server: dict[int, list[Decimal]] = defaultdict(list)
-    for offer in offers:
-        prices_by_server[offer.server_id].append(offer.price)
+    """Write snapshots for the whole category and for every requested slice.
 
+    The unfiltered per-server snapshots are always written. Additional rows are
+    created for each active subscription slice so alerts and charts can use a
+    history that matches the user's type/title filter.
+    """
+    funpay_by_orm_id = {server.id: funpay_id for funpay_id, server in servers.items()}
+    created: set[tuple[int, str | None, str | None]] = set()
     snapshots: list[PriceSnapshot] = []
-    for funpay_server_id, prices in prices_by_server.items():
+
+    def grouped_prices(
+        item_type: str | None,
+        query: str | None,
+    ) -> dict[int, list[Decimal]]:
+        prices: dict[int, list[Decimal]] = defaultdict(list)
+        for offer in offers:
+            if _offer_matches(offer, item_type, query):
+                prices[offer.server_id].append(offer.price)
+        return prices
+
+    def add_slice(
+        server_id: int,
+        item_type: str | None,
+        query: str | None,
+        prices: list[Decimal],
+    ) -> None:
+        key = (server_id, item_type, query)
+        if key in created or not prices:
+            return
+        created.add(key)
         snapshot = PriceSnapshot(
             category_id=category_id,
-            server_id=servers[funpay_server_id].id,
+            server_id=server_id,
+            item_type=item_type,
+            query=query,
             min_price=min(prices),
             median_price=median(prices),
             offer_count=len(prices),
         )
         session.add(snapshot)
         snapshots.append(snapshot)
+
+    for funpay_server_id, prices in grouped_prices(None, None).items():
+        add_slice(servers[funpay_server_id].id, None, None, prices)
+
+    for snapshot_filter in filters:
+        if (
+            snapshot_filter.server_id is None
+            and snapshot_filter.item_type is None
+            and snapshot_filter.query is None
+        ):
+            continue
+
+        prices_by_server = grouped_prices(snapshot_filter.item_type, snapshot_filter.query)
+        if snapshot_filter.server_id is not None:
+            funpay_server_id = funpay_by_orm_id.get(snapshot_filter.server_id)
+            if funpay_server_id is None:
+                continue
+            add_slice(
+                snapshot_filter.server_id,
+                snapshot_filter.item_type,
+                snapshot_filter.query,
+                prices_by_server.get(funpay_server_id, []),
+            )
+            continue
+
+        for funpay_server_id, prices in prices_by_server.items():
+            add_slice(
+                servers[funpay_server_id].id,
+                snapshot_filter.item_type,
+                snapshot_filter.query,
+                prices,
+            )
 
     await session.flush()
     return snapshots
@@ -214,13 +297,28 @@ async def list_price_snapshots(
     category_id: int,
     *,
     server_id: int | None = None,
+    item_type: str | None = None,
+    query: str | None = None,
     since: datetime | None = None,
     limit: int | None = None,
 ) -> list[PriceSnapshot]:
-    """Return snapshots oldest-first, optionally filtered by server and period."""
+    """Return snapshots oldest-first for one server/type/title slice.
+
+    ``item_type=None`` and ``query=None`` select unfiltered snapshots rather
+    than disabling the filter, because filtered and unfiltered history are
+    stored side by side.
+    """
     statement = select(PriceSnapshot).where(PriceSnapshot.category_id == category_id)
     if server_id is not None:
         statement = statement.where(PriceSnapshot.server_id == server_id)
+    statement = statement.where(
+        PriceSnapshot.item_type.is_(None)
+        if item_type is None
+        else PriceSnapshot.item_type == item_type
+    )
+    statement = statement.where(
+        PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query
+    )
     if since is not None:
         statement = statement.where(PriceSnapshot.captured_at >= since)
 
@@ -288,6 +386,8 @@ async def upsert_subscription(
     server_id: int | None,
     mode: str,
     threshold: Decimal | None,
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> Subscription:
     """Create an alert rule or refresh the threshold of an identical active one."""
     statement = select(Subscription).where(
@@ -300,6 +400,14 @@ async def upsert_subscription(
         statement = statement.where(Subscription.server_id.is_(None))
     else:
         statement = statement.where(Subscription.server_id == server_id)
+    statement = statement.where(
+        Subscription.item_type.is_(None)
+        if item_type is None
+        else Subscription.item_type == item_type
+    )
+    statement = statement.where(
+        Subscription.query.is_(None) if query is None else Subscription.query == query
+    )
 
     subscription = await session.scalar(statement)
     if subscription is None:
@@ -307,6 +415,8 @@ async def upsert_subscription(
             user_id=user_id,
             category_id=category_id,
             server_id=server_id,
+            item_type=item_type,
+            query=query,
             mode=mode,
             threshold=threshold,
             is_active=True,
@@ -386,11 +496,20 @@ async def current_price_summary(
     session: AsyncSession,
     category_id: int,
     server_id: int | None = None,
+    *,
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> PriceSummary | None:
     """Compute current min/median/count directly from the offers table."""
     statement = select(Offer.price).where(Offer.category_id == category_id)
     if server_id is not None:
         statement = statement.where(Offer.server_id == server_id)
+    if item_type is not None:
+        statement = statement.where(Offer.item_type == item_type)
+    if query is not None:
+        statement = statement.where(
+            func.lower(Offer.title).contains(query.casefold(), autoescape=True)
+        )
 
     prices = list(await session.scalars(statement))
     if not prices:
@@ -406,6 +525,8 @@ async def list_aggregated_snapshots(
     session: AsyncSession,
     category_id: int,
     *,
+    item_type: str | None = None,
+    query: str | None = None,
     since: datetime | None = None,
     limit: int | None = None,
 ) -> list[SnapshotAggregate]:
@@ -422,6 +543,12 @@ async def list_aggregated_snapshots(
             func.sum(PriceSnapshot.offer_count),
         )
         .where(PriceSnapshot.category_id == category_id)
+        .where(
+            PriceSnapshot.item_type.is_(None)
+            if item_type is None
+            else PriceSnapshot.item_type == item_type
+        )
+        .where(PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query)
         .group_by(PriceSnapshot.captured_at)
         .order_by(PriceSnapshot.captured_at.desc())
     )
@@ -465,10 +592,34 @@ async def list_category_subscriptions(
     return list(result)
 
 
+async def list_category_snapshot_filters(
+    session: AsyncSession,
+    category_id: int,
+) -> list[SnapshotFilter]:
+    """Return distinct slices that active subscriptions of a category need."""
+    rows = (
+        await session.execute(
+            select(Subscription.server_id, Subscription.item_type, Subscription.query)
+            .where(
+                Subscription.category_id == category_id,
+                Subscription.is_active.is_(True),
+            )
+            .distinct()
+        )
+    ).all()
+    return [
+        SnapshotFilter(server_id=server_id, item_type=item_type, query=query)
+        for server_id, item_type, query in rows
+    ]
+
+
 async def _category_snapshot_at(
     session: AsyncSession,
     category_id: int,
     captured_at: datetime,
+    *,
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> SnapshotPoint | None:
     row = (
         await session.execute(
@@ -480,6 +631,10 @@ async def _category_snapshot_at(
             ).where(
                 PriceSnapshot.category_id == category_id,
                 PriceSnapshot.captured_at == captured_at,
+                PriceSnapshot.item_type.is_(None)
+                if item_type is None
+                else PriceSnapshot.item_type == item_type,
+                PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query,
             )
         )
     ).one()
@@ -498,6 +653,9 @@ async def latest_snapshot_point(
     session: AsyncSession,
     category_id: int,
     server_id: int | None = None,
+    *,
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> SnapshotPoint | None:
     """Return the newest snapshot for a category or one server.
 
@@ -510,6 +668,10 @@ async def latest_snapshot_point(
             .where(
                 PriceSnapshot.category_id == category_id,
                 PriceSnapshot.server_id == server_id,
+                PriceSnapshot.item_type.is_(None)
+                if item_type is None
+                else PriceSnapshot.item_type == item_type,
+                PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query,
             )
             .order_by(PriceSnapshot.captured_at.desc(), PriceSnapshot.id.desc())
             .limit(1)
@@ -525,11 +687,24 @@ async def latest_snapshot_point(
         )
 
     captured_at = await session.scalar(
-        select(func.max(PriceSnapshot.captured_at)).where(PriceSnapshot.category_id == category_id)
+        select(func.max(PriceSnapshot.captured_at))
+        .where(PriceSnapshot.category_id == category_id)
+        .where(
+            PriceSnapshot.item_type.is_(None)
+            if item_type is None
+            else PriceSnapshot.item_type == item_type
+        )
+        .where(PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query)
     )
     if captured_at is None:
         return None
-    return await _category_snapshot_at(session, category_id, captured_at)
+    return await _category_snapshot_at(
+        session,
+        category_id,
+        captured_at,
+        item_type=item_type,
+        query=query,
+    )
 
 
 async def previous_snapshot_point(
@@ -537,6 +712,9 @@ async def previous_snapshot_point(
     category_id: int,
     server_id: int | None,
     before: datetime,
+    *,
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> SnapshotPoint | None:
     """Return the newest snapshot strictly older than ``before``."""
     if server_id is not None:
@@ -546,6 +724,10 @@ async def previous_snapshot_point(
                 PriceSnapshot.category_id == category_id,
                 PriceSnapshot.server_id == server_id,
                 PriceSnapshot.captured_at < before,
+                PriceSnapshot.item_type.is_(None)
+                if item_type is None
+                else PriceSnapshot.item_type == item_type,
+                PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query,
             )
             .order_by(PriceSnapshot.captured_at.desc(), PriceSnapshot.id.desc())
             .limit(1)
@@ -561,14 +743,27 @@ async def previous_snapshot_point(
         )
 
     captured_at = await session.scalar(
-        select(func.max(PriceSnapshot.captured_at)).where(
+        select(func.max(PriceSnapshot.captured_at))
+        .where(
             PriceSnapshot.category_id == category_id,
             PriceSnapshot.captured_at < before,
         )
+        .where(
+            PriceSnapshot.item_type.is_(None)
+            if item_type is None
+            else PriceSnapshot.item_type == item_type
+        )
+        .where(PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query)
     )
     if captured_at is None:
         return None
-    return await _category_snapshot_at(session, category_id, captured_at)
+    return await _category_snapshot_at(
+        session,
+        category_id,
+        captured_at,
+        item_type=item_type,
+        query=query,
+    )
 
 
 async def historical_min_price(
@@ -576,6 +771,9 @@ async def historical_min_price(
     category_id: int,
     server_id: int | None,
     before: datetime,
+    *,
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> Decimal | None:
     """Return the lowest price seen before ``before``."""
     statement = select(func.min(PriceSnapshot.min_price)).where(
@@ -584,7 +782,25 @@ async def historical_min_price(
     )
     if server_id is not None:
         statement = statement.where(PriceSnapshot.server_id == server_id)
+    statement = statement.where(
+        PriceSnapshot.item_type.is_(None)
+        if item_type is None
+        else PriceSnapshot.item_type == item_type
+    )
+    statement = statement.where(
+        PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query
+    )
     return await session.scalar(statement)
+
+
+async def latest_category_captured_at(
+    session: AsyncSession,
+    category_id: int,
+) -> datetime | None:
+    """Return the moment of the newest parse run for a category."""
+    return await session.scalar(
+        select(func.max(PriceSnapshot.captured_at)).where(PriceSnapshot.category_id == category_id)
+    )
 
 
 async def last_notification_at(
