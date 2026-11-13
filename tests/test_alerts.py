@@ -134,10 +134,14 @@ async def add_snapshot(
     price: Decimal,
     median: Decimal | None = None,
     count: int = 1,
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> PriceSnapshot:
     snapshot = PriceSnapshot(
         category_id=category_id,
         server_id=server_id,
+        item_type=item_type,
+        query=query,
         min_price=price,
         median_price=median if median is not None else price,
         offer_count=count,
@@ -153,6 +157,8 @@ async def make_subscription(
     *,
     mode: str,
     threshold: Decimal | None = None,
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> tuple[int, int, int]:
     user = await get_or_create_user(session, 5001)
     category = await get_or_create_category(session, INFO)
@@ -166,6 +172,8 @@ async def make_subscription(
         server_id=server.id,
         mode=mode,
         threshold=threshold,
+        item_type=item_type,
+        query=query,
     )
     await session.commit()
     return subscription.id, category.id, server.id
@@ -455,3 +463,119 @@ async def test_evaluate_any_server_uses_category_wide_minimum(
     assert alerts[0].server_name == "любой сервер"
     assert alerts[0].price == Decimal("85")
     assert alerts[0].previous_price == Decimal("95")
+
+
+async def test_filtered_alert_uses_only_matching_slice(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        subscription_id, category_id, server_id = await make_subscription(
+            session,
+            mode="abs",
+            threshold=Decimal("100"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        # Unfiltered history is much more expensive and must be ignored.
+        await add_snapshot(
+            session,
+            category_id=category_id,
+            server_id=server_id,
+            captured_at=NOW - timedelta(hours=2),
+            price=Decimal("300"),
+        )
+        await add_snapshot(
+            session,
+            category_id=category_id,
+            server_id=server_id,
+            captured_at=NOW,
+            price=Decimal("200"),
+        )
+        await add_snapshot(
+            session,
+            category_id=category_id,
+            server_id=server_id,
+            captured_at=NOW - timedelta(hours=2),
+            price=Decimal("120"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        await add_snapshot(
+            session,
+            category_id=category_id,
+            server_id=server_id,
+            captured_at=NOW,
+            price=Decimal("90"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        alerts = await evaluate_category_alerts(
+            session,
+            category_id,
+            cooldown=timedelta(hours=6),
+            now=NOW,
+        )
+
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert.subscription_id == subscription_id
+    assert alert.price == Decimal("90")
+    assert alert.previous_price == Decimal("120")
+    assert alert.item_type == "предметы"
+    assert alert.query == "plush nessie"
+
+    text = format_alert_text(alert)
+    assert "Серебро Albion Online · Предметы · «plush nessie» · EU" in text
+
+
+async def test_stale_filtered_snapshot_does_not_alert(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        _, category_id, server_id = await make_subscription(
+            session,
+            mode="abs",
+            threshold=Decimal("100"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        # The latest run has no matching offers, so its filtered slice is old.
+        await add_snapshot(
+            session,
+            category_id=category_id,
+            server_id=server_id,
+            captured_at=NOW - timedelta(hours=4),
+            price=Decimal("150"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        await add_snapshot(
+            session,
+            category_id=category_id,
+            server_id=server_id,
+            captured_at=NOW - timedelta(hours=3),
+            price=Decimal("80"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        await add_snapshot(
+            session,
+            category_id=category_id,
+            server_id=server_id,
+            captured_at=NOW,
+            price=Decimal("200"),
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        alerts = await evaluate_category_alerts(
+            session,
+            category_id,
+            cooldown=timedelta(hours=6),
+            now=NOW,
+        )
+
+    assert alerts == []

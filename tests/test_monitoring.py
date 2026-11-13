@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from app.db.models import Category, Offer, ParseRun, PriceSnapshot
-from app.db.repositories import get_or_create_category
+from app.db.repositories import get_or_create_category, get_or_create_user, upsert_subscription
 from app.parsers.base import BaseParser, CategoryInfo, ParsedCategory
 from app.parsers.base import Offer as ParsedOffer
 from app.services.monitoring import MonitoringService
@@ -176,6 +176,101 @@ async def test_run_category_by_id_returns_none_for_missing(
     monitoring = MonitoringService(FakeParser(result=parsed_result([])), session_factory)
 
     assert await monitoring.run_category_by_id(999999) is None
+
+
+async def test_import_category_reports_offer_types(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    parser = FakeParser(
+        result=parsed_result(
+            [
+                parsed_offer(
+                    server_id=1,
+                    server_name="EU",
+                    item_type="предметы",
+                    title="Plush Nessie",
+                ),
+                parsed_offer(
+                    server_id=1,
+                    server_name="EU",
+                    item_type="предметы",
+                    title="Plush Nessie",
+                ),
+                parsed_offer(
+                    server_id=1,
+                    server_name="EU",
+                    item_type="услуги",
+                    title="Boost",
+                ),
+            ]
+        )
+    )
+    monitoring = MonitoringService(parser, session_factory)
+
+    imported = await monitoring.import_category("/lots/2932/")
+
+    assert imported.item_types == ("предметы", "услуги")
+
+
+async def test_worker_writes_snapshots_for_filtered_subscription(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    category_id = await seed_category(session_factory)
+    async with session_factory() as session:
+        user = await get_or_create_user(session, 8001)
+        await upsert_subscription(
+            session,
+            user_id=user.id,
+            category_id=category_id,
+            server_id=None,
+            mode="abs",
+            threshold=Decimal("100"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        await session.commit()
+
+    parser = FakeParser(
+        result=parsed_result(
+            [
+                parsed_offer(
+                    server_id=1,
+                    server_name="EU",
+                    price=Decimal("10"),
+                    item_type="предметы",
+                    title="Plush Nessie",
+                ),
+                parsed_offer(
+                    server_id=1,
+                    server_name="EU",
+                    price=Decimal("30"),
+                    item_type="услуги",
+                    title="Boost",
+                ),
+            ]
+        )
+    )
+    monitoring = MonitoringService(parser, session_factory)
+
+    outcomes = await monitoring.run_all_active()
+
+    assert len(outcomes) == 1
+    # One baseline snapshot plus one for the filtered subscription.
+    assert outcomes[0].snapshots_created == 2
+
+    async with session_factory() as session:
+        snapshots = list(
+            await session.scalars(
+                select(PriceSnapshot).where(PriceSnapshot.category_id == category_id)
+            )
+        )
+
+    by_filter = {(row.item_type, row.query): row for row in snapshots}
+    assert set(by_filter) == {(None, None), ("предметы", "plush nessie")}
+    assert by_filter[(None, None)].min_price == Decimal("10")
+    assert by_filter[(None, None)].offer_count == 2
+    assert by_filter[("предметы", "plush nessie")].min_price == Decimal("10")
+    assert by_filter[("предметы", "plush nessie")].offer_count == 1
 
 
 async def test_import_category_persists_unknown_category(

@@ -3,8 +3,10 @@ import json
 from app.bot.keyboards import (
     cancel_keyboard,
     confirm_keyboard,
+    item_types_keyboard,
     main_menu_keyboard,
     modes_keyboard,
+    query_keyboard,
     servers_keyboard,
     subscriptions_keyboard,
 )
@@ -66,11 +68,23 @@ def test_subscriptions_keyboard_has_actions() -> None:
     ]
 
 
+def test_item_types_keyboard_has_all_and_cancel() -> None:
+    keyboard = item_types_keyboard(["Предметы", "Услуги", "Гайды"])
+
+    assert labels(keyboard) == ["Все", "Предметы", "Услуги", "Гайды", "Отмена"]
+
+
+def test_query_keyboard_has_skip_and_cancel() -> None:
+    assert labels(query_keyboard()) == ["Пропустить", "Отмена"]
+
+
 def test_inline_keyboards_never_set_one_time() -> None:
     """VK rejects one_time=true for inline keyboards with error 911."""
 
     keyboards = [
         servers_keyboard(["EU"]),
+        item_types_keyboard(["Предметы"]),
+        query_keyboard(),
         cancel_keyboard(),
         confirm_keyboard(),
         modes_keyboard(),

@@ -10,7 +10,11 @@ from app.parsers.funpay import FunPayParser
 
 
 def _format_money(value: Decimal | None) -> str:
-    return f"{value:.2f}" if value is not None else "—"
+    if value is None:
+        return "—"
+    if value != 0 and abs(value) < 1:
+        return f"{value:.6f}".rstrip("0").rstrip(".")
+    return f"{value:.2f}"
 
 
 async def run(url: str) -> None:
@@ -26,6 +30,7 @@ async def run(url: str) -> None:
     print(f"Offers: {len(parsed.offers)}")
     print(f"Min price: {_format_money(parsed.min_price)} RUB")
     print(f"Median price: {_format_money(parsed.median_price)} RUB")
+    print(f"Item types: {', '.join(parsed.item_types) or '—'}")
 
     servers = {offer.server_name for offer in parsed.offers}
     print(f"Servers: {', '.join(sorted(servers)) or '—'}")
@@ -35,9 +40,11 @@ async def run(url: str) -> None:
         amount = f"{offer.amount:g}" if offer.amount is not None else "—"
         online = "online" if offer.is_online else "offline"
         promo = ", promo" if offer.is_promo else ""
+        item_type = offer.item_type or "—"
         print(
-            f"  {offer.price:>10.2f} {offer.currency} | amount {amount:>15} | "
-            f"{offer.server_name:<24} | {offer.seller_name or '—'} ({online}{promo})"
+            f"  {_format_money(offer.price):>10} {offer.currency} | amount {amount:>15} | "
+            f"{item_type:<12} | {offer.server_name:<24} | "
+            f"{offer.seller_name or '—'} ({online}{promo})"
         )
 
 

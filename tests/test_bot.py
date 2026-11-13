@@ -41,6 +41,8 @@ def test_create_bot_registers_all_handlers() -> None:
         "stats_handler",
         "unsubscribe_handler",
         "waiting_link_handler",
+        "waiting_item_type_handler",
+        "waiting_query_handler",
         "waiting_server_handler",
         "waiting_mode_handler",
         "waiting_threshold_handler",
@@ -72,11 +74,13 @@ def test_admin_handlers_run_before_link_handler() -> None:
 def test_add_states_are_distinct() -> None:
     states = {
         AddSubscriptionStates.WAITING_LINK,
+        AddSubscriptionStates.WAITING_ITEM_TYPE,
+        AddSubscriptionStates.WAITING_QUERY,
         AddSubscriptionStates.WAITING_SERVER,
         AddSubscriptionStates.WAITING_MODE,
         AddSubscriptionStates.WAITING_THRESHOLD,
         AddSubscriptionStates.WAITING_CONFIRM,
     }
 
-    assert len(states) == 5
+    assert len(states) == 7
     assert str(AddSubscriptionStates.WAITING_LINK) == ("AddSubscriptionStates:waiting_link")

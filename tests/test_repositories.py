@@ -7,6 +7,7 @@ from app.db.repositories import (
     PARSE_RUN_ERROR,
     PARSE_RUN_OK,
     PARSE_RUN_RUNNING,
+    SnapshotFilter,
     add_price_snapshots,
     count_active_subscriptions,
     current_price_summary,
@@ -17,8 +18,10 @@ from app.db.repositories import (
     get_or_create_category,
     get_or_create_user,
     get_user_subscription,
+    latest_snapshot_point,
     list_active_categories,
     list_aggregated_snapshots,
+    list_category_snapshot_filters,
     list_price_snapshots,
     list_user_subscriptions,
     replace_offers,
@@ -402,6 +405,229 @@ async def test_current_price_summary_and_aggregation(
     assert aggregates[0].min_price == Decimal("10")
     assert aggregates[0].median_price == Decimal("22.5")
     assert aggregates[0].offer_count == 3
+
+
+async def test_filtered_offers_get_their_own_snapshots_and_summaries(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    offers = [
+        parsed_offer(
+            server_id=1,
+            server_name="EU",
+            price=Decimal("10"),
+            item_type="предметы",
+            title="Plush Nessie",
+        ),
+        parsed_offer(
+            server_id=1,
+            server_name="EU",
+            price=Decimal("20"),
+            item_type="предметы",
+            title="Plush Nessie",
+        ),
+        parsed_offer(
+            server_id=1,
+            server_name="EU",
+            price=Decimal("30"),
+            item_type="услуги",
+            title="Plush Nessie boost",
+        ),
+        parsed_offer(
+            server_id=2,
+            server_name="NA",
+            price=Decimal("40"),
+            item_type="предметы",
+            title="Plush Nessie",
+        ),
+        parsed_offer(
+            server_id=2,
+            server_name="NA",
+            price=Decimal("50"),
+            item_type="услуги",
+            title="Other",
+        ),
+    ]
+
+    async with session_factory() as session:
+        category = await get_or_create_category(session, INFO)
+        servers = await upsert_servers(session, category.id, offers)
+        eu_id = servers[1].id
+        na_id = servers[2].id
+        await replace_offers(session, category.id, offers, servers)
+        snapshots = await add_price_snapshots(
+            session,
+            category.id,
+            offers,
+            servers,
+            [
+                SnapshotFilter(
+                    server_id=eu_id,
+                    item_type="предметы",
+                    query="plush nessie",
+                ),
+                SnapshotFilter(server_id=None, item_type="услуги"),
+            ],
+        )
+        await session.commit()
+        category_id = category.id
+
+    # Two baseline rows plus three rows for the requested slices.
+    assert len(snapshots) == 5
+
+    async with session_factory() as session:
+        baseline_eu = await list_price_snapshots(session, category_id, server_id=eu_id)
+        filtered_eu = await list_price_snapshots(
+            session,
+            category_id,
+            server_id=eu_id,
+            item_type="предметы",
+            query="plush nessie",
+        )
+        services_eu = await list_price_snapshots(
+            session, category_id, server_id=eu_id, item_type="услуги"
+        )
+        services_na = await list_price_snapshots(
+            session, category_id, server_id=na_id, item_type="услуги"
+        )
+        filtered_point = await latest_snapshot_point(
+            session,
+            category_id,
+            eu_id,
+            item_type="предметы",
+            query="plush nessie",
+        )
+        services_point = await latest_snapshot_point(session, category_id, item_type="услуги")
+        filtered_summary = await current_price_summary(
+            session,
+            category_id,
+            item_type="предметы",
+            query="plush nessie",
+        )
+        filtered_eu_summary = await current_price_summary(
+            session,
+            category_id,
+            eu_id,
+            item_type="предметы",
+        )
+        services_summary = await current_price_summary(session, category_id, item_type="услуги")
+        services_query_summary = await current_price_summary(
+            session,
+            category_id,
+            item_type="услуги",
+            query="nessie",
+        )
+        aggregates = await list_aggregated_snapshots(session, category_id, item_type="услуги")
+
+    assert len(baseline_eu) == 1
+    assert baseline_eu[0].item_type is None
+    assert baseline_eu[0].min_price == Decimal("10")
+    assert baseline_eu[0].offer_count == 3
+
+    assert len(filtered_eu) == 1
+    assert filtered_eu[0].item_type == "предметы"
+    assert filtered_eu[0].query == "plush nessie"
+    assert filtered_eu[0].min_price == Decimal("10")
+    assert filtered_eu[0].median_price == Decimal("15")
+    assert filtered_eu[0].offer_count == 2
+
+    assert [row.min_price for row in services_eu] == [Decimal("30")]
+    assert [row.min_price for row in services_na] == [Decimal("50")]
+
+    assert filtered_point is not None
+    assert filtered_point.min_price == Decimal("10")
+    assert filtered_point.median_price == Decimal("15")
+    assert filtered_point.offer_count == 2
+
+    assert services_point is not None
+    assert services_point.min_price == Decimal("30")
+    assert services_point.median_price == Decimal("40")
+    assert services_point.offer_count == 2
+
+    assert filtered_summary is not None
+    assert filtered_summary.min_price == Decimal("10")
+    assert filtered_summary.median_price == Decimal("20")
+    assert filtered_summary.offer_count == 3
+
+    assert filtered_eu_summary is not None
+    assert filtered_eu_summary.min_price == Decimal("10")
+    assert filtered_eu_summary.median_price == Decimal("15")
+    assert filtered_eu_summary.offer_count == 2
+
+    assert services_summary is not None
+    assert services_summary.min_price == Decimal("30")
+    assert services_summary.median_price == Decimal("40")
+    assert services_summary.offer_count == 2
+
+    assert services_query_summary is not None
+    assert services_query_summary.offer_count == 1
+    assert services_query_summary.min_price == Decimal("30")
+
+    assert len(aggregates) == 1
+    assert aggregates[0].min_price == Decimal("30")
+    assert aggregates[0].median_price == Decimal("40")
+    assert aggregates[0].offer_count == 2
+
+
+async def test_subscription_identity_includes_offer_filter(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        user = await get_or_create_user(session, 7001)
+        category = await get_or_create_category(session, INFO)
+        servers = await upsert_servers(
+            session,
+            category.id,
+            [parsed_offer(server_id=1, server_name="EU")],
+        )
+        baseline = await upsert_subscription(
+            session,
+            user_id=user.id,
+            category_id=category.id,
+            server_id=servers[1].id,
+            mode="abs",
+            threshold=Decimal("100"),
+        )
+        filtered = await upsert_subscription(
+            session,
+            user_id=user.id,
+            category_id=category.id,
+            server_id=servers[1].id,
+            mode="abs",
+            threshold=Decimal("100"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        await session.commit()
+        user_id = user.id
+        category_id = category.id
+        server_id = servers[1].id
+        baseline_id = baseline.id
+        filtered_id = filtered.id
+
+    assert filtered_id != baseline_id
+
+    async with session_factory() as session:
+        same = await upsert_subscription(
+            session,
+            user_id=user_id,
+            category_id=category_id,
+            server_id=server_id,
+            mode="abs",
+            threshold=Decimal("80"),
+            item_type="предметы",
+            query="plush nessie",
+        )
+        await session.commit()
+
+        assert same.id == filtered_id
+        assert same.threshold == Decimal("80")
+
+        filters = await list_category_snapshot_filters(session, category_id)
+
+    assert {(item.server_id, item.item_type, item.query) for item in filters} == {
+        (server_id, None, None),
+        (server_id, "предметы", "plush nessie"),
+    }
 
 
 async def test_fail_stale_parse_runs(

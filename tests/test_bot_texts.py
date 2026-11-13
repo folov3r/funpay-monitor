@@ -6,7 +6,9 @@ import pytest
 from app.bot.texts import (
     extract_category_path,
     format_condition,
+    format_item_type,
     format_money,
+    format_offer_filter,
     format_stats_text,
     format_subscription_list,
     is_add_command,
@@ -14,7 +16,9 @@ from app.bot.texts import (
     is_list_command,
     is_stats_command,
     is_unsubscribe_command,
+    item_type_from_label,
     mode_from_label,
+    normalize_query,
     normalize_text,
     parse_subscription_id,
     parse_threshold,
@@ -128,7 +132,62 @@ def test_mode_from_label(label: str, expected: str | None) -> None:
 
 def test_format_money() -> None:
     assert format_money(Decimal("1234.5")) == "1 234,50 ₽"
+    assert format_money(Decimal("0.001191")) == "0,001191 ₽"
+    assert format_money(Decimal("0.5")) == "0,5 ₽"
+    assert format_money(Decimal("0")) == "0,00 ₽"
     assert format_money(None) == "—"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("предметы", "Предметы"),
+        ("услуги", "Услуги"),
+        ("gamepass", "Gamepass"),
+        ("c$", "C$"),
+        (None, None),
+        ("unknown", "Unknown"),
+    ],
+)
+def test_format_item_type(value: str | None, expected: str | None) -> None:
+    assert format_item_type(value) == expected
+
+
+def test_format_offer_filter() -> None:
+    assert format_offer_filter("предметы", "plush nessie") == "Предметы · «plush nessie»"
+    assert format_offer_filter(None, "plush nessie") == "«plush nessie»"
+    assert format_offer_filter("предметы", None) == "Предметы"
+    assert format_offer_filter(None, None) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Предметы", (True, "предметы")),
+        ("предметы", (True, "предметы")),
+        ("Все", (True, None)),
+        ("все типы", (True, None)),
+        ("что-то", (False, None)),
+    ],
+)
+def test_item_type_from_label(
+    text: str,
+    expected: tuple[bool, str | None],
+) -> None:
+    assert item_type_from_label(text, ["предметы", "услуги"]) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("  Plush   NESSIE ", "plush nessie"),
+        ("Пропустить", None),
+        ("", None),
+        ("x" * 300, "x" * 255),
+    ],
+)
+def test_normalize_query(text: str, expected: str | None) -> None:
+    assert normalize_query(text) == expected
 
 
 def test_format_condition() -> None:
@@ -143,11 +202,15 @@ def make_subscription(
     mode: str = "abs",
     threshold: Decimal | None = Decimal("100"),
     server_name: str | None = "EU",
+    item_type: str | None = None,
+    query: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=subscription_id,
         mode=mode,
         threshold=threshold,
+        item_type=item_type,
+        query=query,
         category=SimpleNamespace(title="Серебро"),
         server=SimpleNamespace(name=server_name) if server_name else None,
     )
@@ -169,6 +232,25 @@ def test_format_subscription_list() -> None:
 
 def test_format_subscription_list_when_empty() -> None:
     assert "пока нет активных подписок" in format_subscription_list([], {})
+
+
+def test_format_subscription_list_shows_filter() -> None:
+    subscription = make_subscription(item_type="предметы", query="plush nessie")
+
+    text = format_subscription_list(
+        [subscription],
+        {1: PriceSummary(Decimal("95"), Decimal("110"), 12)},
+    )
+
+    assert "Предметы · «plush nessie» · EU" in text
+
+
+def test_format_stats_text_shows_filter() -> None:
+    subscription = make_subscription(item_type="предметы", query="plush nessie")
+
+    text = format_stats_text(subscription, PriceSummary(Decimal("90"), Decimal("105"), 8), [])
+
+    assert "Фильтр: Предметы · «plush nessie»" in text
 
 
 def test_format_stats_text_with_history() -> None:

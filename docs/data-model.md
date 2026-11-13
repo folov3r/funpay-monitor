@@ -67,12 +67,16 @@ categories 1 ─── * price_snapshots ─── 1 servers ──────�
 | `category_id`, `server_id` | FK | принадлежность |
 | `seller_id`, `seller_name` | bigint, varchar | продавец |
 | `amount` | numeric(18,2) | количество (`кк` × 1 000 000) |
-| `price` | numeric(12,2) | цена лота |
+| `price` | numeric(18,6) | цена лота |
 | `currency` | varchar(8) | по умолчанию RUB |
+| `item_type` | varchar(64) nullable | тип предложения, нижний регистр |
+| `method` | varchar(64) nullable | способ получения с FunPay |
+| `title` | text nullable | название предмета для поиска |
 | `is_online`, `is_promo` | boolean | флаги продавца и промо |
 | `parsed_at` | timestamptz | время записи |
 
-Индекс: `(category_id, server_id, price)`.
+Индексы: `(category_id, server_id, price)` и
+`(category_id, item_type, price)`.
 
 ## price_snapshots
 
@@ -81,15 +85,22 @@ categories 1 ─── * price_snapshots ─── 1 servers ──────�
 | Поле | Тип | Описание |
 |---|---|---|
 | `category_id`, `server_id` | FK | принадлежность |
-| `min_price` | numeric(12,2) | минимум по серверу |
-| `median_price` | numeric(12,2) | медиана по серверу |
+| `item_type` | varchar(64) nullable | срез по типу предложения |
+| `query` | varchar(255) nullable | срез по названию, нижний регистр |
+| `min_price` | numeric(18,6) | минимум по срезу |
+| `median_price` | numeric(18,6) | медиана по срезу |
 | `offer_count` | integer | число офферов |
 | `captured_at` | timestamptz | время снапшота |
 
 Снапшоты одного прогона получают одинаковый `captured_at`, потому что PostgreSQL
 `now()` фиксируется на транзакцию. Это используется для агрегации категории.
 
-Индекс: `(category_id, server_id, captured_at)`.
+Для каждой категории всегда пишутся базовые снапшоты с `item_type IS NULL` и
+`query IS NULL`. Дополнительно создаются снапшоты для срезов активных подписок:
+тип и/или название. Поэтому `NULL` в фильтре означает «базовый срез», а не
+«любой срез».
+
+Индекс: `(category_id, server_id, item_type, query, captured_at)`.
 
 ## parse_runs
 
@@ -111,10 +122,16 @@ categories 1 ─── * price_snapshots ─── 1 servers ──────�
 |---|---|---|
 | `user_id`, `category_id` | FK | кому и за чем следить |
 | `server_id` | FK nullable | `NULL` — любой сервер |
+| `item_type` | varchar(64) nullable | тип предложения, `NULL` — все |
+| `query` | varchar(255) nullable | часть названия, `NULL` — без поиска |
 | `mode` | varchar(16) | `abs`, `pct`, `lowest` |
-| `threshold` | numeric(12,2) nullable | порог в рублях или процентах |
+| `threshold` | numeric(18,6) nullable | порог в рублях или процентах |
 | `is_active` | boolean | мягкое удаление |
 | `created_at` | timestamptz | дата создания |
+
+Подписки различаются по `(user, category, server, mode, item_type, query)`,
+поэтому в одной категории можно отдельно следить за предметами, услугами и
+конкретным названием.
 
 ## notifications
 
@@ -124,7 +141,7 @@ categories 1 ─── * price_snapshots ─── 1 servers ──────�
 |---|---|---|
 | `subscription_id`, `snapshot_id` | FK | подписка и снимок |
 | `sent_at` | timestamptz | время отправки |
-| `price` | numeric(12,2) | цена на момент алерта |
+| `price` | numeric(18,6) | цена на момент алерта |
 | `reason` | varchar(16) | `abs`, `pct`, `lowest` |
 
 Перед отправкой проверяется последний `sent_at` по подписке: если прошло меньше
