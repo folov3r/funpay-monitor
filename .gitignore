@@ -37,3 +37,6 @@ pgdata/
 
 # Docs build
 site/
+
+# vkbottle state
+.vkbottle/

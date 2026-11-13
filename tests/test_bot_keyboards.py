@@ -64,3 +64,20 @@ def test_subscriptions_keyboard_has_actions() -> None:
         "Статистика #7",
         "Удалить #7",
     ]
+
+
+def test_inline_keyboards_never_set_one_time() -> None:
+    """VK rejects one_time=true for inline keyboards with error 911."""
+
+    keyboards = [
+        servers_keyboard(["EU"]),
+        cancel_keyboard(),
+        confirm_keyboard(),
+        modes_keyboard(),
+        subscriptions_keyboard([1]),
+    ]
+    for keyboard in keyboards:
+        assert keyboard is not None
+        payload = json.loads(keyboard.get_json())
+        assert payload["inline"] is True
+        assert payload["one_time"] is False

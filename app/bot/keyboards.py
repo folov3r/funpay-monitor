@@ -43,14 +43,14 @@ def servers_keyboard(server_names: Sequence[str]) -> Keyboard:
 
 
 def cancel_keyboard() -> Keyboard:
-    return Keyboard(one_time=True, inline=True).add(
+    return Keyboard(one_time=False, inline=True).add(
         Text(CANCEL_LABEL), color=KeyboardButtonColor.NEGATIVE
     )
 
 
 def confirm_keyboard() -> Keyboard:
     return (
-        Keyboard(one_time=True, inline=True)
+        Keyboard(one_time=False, inline=True)
         .add(Text("Сохранить"), color=KeyboardButtonColor.POSITIVE)
         .add(Text(CANCEL_LABEL), color=KeyboardButtonColor.NEGATIVE)
     )
