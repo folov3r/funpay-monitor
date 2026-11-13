@@ -26,4 +26,5 @@ nav:
   - Тестирование: testing.md
   - Развёртывание: deployment.md
   - Ограничения: limitations.md
+  - Презентация: presentation.md
   - Changelog: changelog.md
