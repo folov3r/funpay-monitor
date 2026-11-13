@@ -9,12 +9,16 @@ import signal
 from datetime import UTC, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from vkbottle.bot import Bot
 
 from app.config import get_settings
 from app.db.base import build_engine, build_session_factory
+from app.db.repositories import PARSE_RUN_OK
 from app.logging import setup_logging
 from app.parsers.funpay import FunPayParser
-from app.services.monitoring import MonitoringService
+from app.services.alert_notifier import VkAlertNotifier
+from app.services.alerts import AlertService
+from app.services.monitoring import MonitoringService, ParseOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +35,38 @@ async def run() -> None:
     parser = FunPayParser()
     monitoring = MonitoringService(parser, session_factory)
 
+    bot: Bot | None = None
+    alerts: AlertService | None = None
+    if settings.vk_group_token:
+        bot = Bot(token=settings.vk_group_token)
+        alerts = AlertService(
+            session_factory,
+            VkAlertNotifier(bot.api),
+            cooldown_hours=settings.alert_cooldown_hours,
+        )
+    else:
+        logger.warning("VK_GROUP_TOKEN is empty: parsing continues, alerts are disabled")
+
+    async def on_outcome(outcome: ParseOutcome) -> None:
+        if alerts is None or outcome.status != PARSE_RUN_OK:
+            return
+        try:
+            sent = await alerts.process_category(outcome.category_id)
+        except Exception:
+            logger.exception("Alert processing failed for %s", outcome.title)
+            return
+        if sent:
+            logger.info("Sent %s alerts for %s", len(sent), outcome.title)
+
     async def parse_job() -> None:
         logger.info("Scheduled parse run started")
         try:
-            outcomes = await monitoring.run_all_active()
+            outcomes = await monitoring.run_all_active(on_outcome)
         except Exception:
             logger.exception("Parse run failed before finishing")
             return
 
-        ok_count = sum(1 for outcome in outcomes if outcome.status == "ok")
+        ok_count = sum(1 for outcome in outcomes if outcome.status == PARSE_RUN_OK)
         failed_count = len(outcomes) - ok_count
         logger.info(
             "Parse run finished: %s categories, %s ok, %s failed",
@@ -77,6 +104,8 @@ async def run() -> None:
     finally:
         scheduler.shutdown(wait=False)
         await parser.aclose()
+        if bot is not None:
+            await bot.api.http_client.close()
         await engine.dispose()
         logger.info("Worker stopped")
 

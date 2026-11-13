@@ -10,6 +10,16 @@ def test_default_settings() -> None:
     assert settings.parse_interval_minutes == 15
     assert settings.request_delay_seconds == 3.0
     assert settings.alert_cooldown_hours == 6
+    assert settings.vk_admin_ids == ""
+    assert settings.admin_vk_ids() == frozenset()
+
+
+def test_settings_parse_admin_ids(monkeypatch) -> None:
+    monkeypatch.setenv("VK_ADMIN_IDS", "123, 456 789")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.admin_vk_ids() == frozenset({123, 456, 789})
 
 
 def test_settings_from_env(monkeypatch) -> None:

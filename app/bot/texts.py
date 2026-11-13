@@ -11,6 +11,7 @@ from app.db.models import Subscription
 from app.db.repositories import PriceSummary
 from app.parsers.funpay import normalize_category_path
 from app.services.charts import ChartPoint
+from app.services.formatting import format_money
 
 FUNPAY_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?funpay\.com/(?:chips|lots)/\d+/?",
@@ -128,14 +129,6 @@ def parse_threshold(text: str, mode: str) -> Decimal | None:
 
 def mode_from_label(text: str | None) -> str | None:
     return MODE_BY_LABEL.get(normalize_text(text))
-
-
-def format_money(value: Decimal | None) -> str:
-    """Format a price in Russian style: 1 234,50 ₽."""
-    if value is None:
-        return "—"
-    formatted = f"{value:,.2f}".replace(",", " ").replace(".", ",")
-    return f"{formatted} ₽"
 
 
 def format_condition(mode: str, threshold: Decimal | None) -> str:

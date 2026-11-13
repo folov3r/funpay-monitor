@@ -35,6 +35,8 @@ async def run() -> None:
         token=settings.vk_group_token,
         session_factory=session_factory,
         parser=parser,
+        admin_vk_ids=settings.admin_vk_ids(),
+        alert_cooldown_hours=settings.alert_cooldown_hours,
     )
 
     stop_event = asyncio.Event()

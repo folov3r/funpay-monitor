@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -68,8 +69,15 @@ class MonitoringService:
         self._parser = parser
         self._session_factory = session_factory
 
-    async def run_all_active(self) -> list[ParseOutcome]:
-        """Parse every active category sequentially, respecting the HTTP throttle."""
+    async def run_all_active(
+        self,
+        on_outcome: Callable[[ParseOutcome], Awaitable[None]] | None = None,
+    ) -> list[ParseOutcome]:
+        """Parse every active category sequentially, respecting the HTTP throttle.
+
+        ``on_outcome`` runs after each category so the worker can evaluate
+        alerts without waiting for the whole batch.
+        """
         async with self._session_factory() as session:
             categories = await list_active_categories(session)
             refs = [
@@ -79,7 +87,10 @@ class MonitoringService:
 
         outcomes: list[ParseOutcome] = []
         for ref in refs:
-            outcomes.append(await self.run_category(ref))
+            outcome = await self.run_category(ref)
+            outcomes.append(outcome)
+            if on_outcome is not None:
+                await on_outcome(outcome)
         return outcomes
 
     async def run_category_by_id(self, category_id: int) -> ParseOutcome | None:

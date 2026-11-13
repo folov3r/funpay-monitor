@@ -45,6 +45,8 @@ def test_create_bot_registers_all_handlers() -> None:
         "waiting_mode_handler",
         "waiting_threshold_handler",
         "waiting_confirm_handler",
+        "admin_status_handler",
+        "admin_reparse_handler",
         "fallback_handler",
     } <= names
 

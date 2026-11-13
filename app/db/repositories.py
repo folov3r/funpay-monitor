@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import (
     Category,
+    Notification,
     Offer,
     ParseRun,
     PriceSnapshot,
@@ -47,6 +48,42 @@ class SnapshotAggregate:
     min_price: Decimal
     median_price: Decimal
     offer_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotPoint:
+    """One snapshot value used to evaluate alert conditions."""
+
+    snapshot_id: int
+    captured_at: datetime
+    min_price: Decimal
+    median_price: Decimal
+    offer_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ParseRunStatus:
+    """A parse run joined with its category, used by admin /status."""
+
+    category_id: int
+    category_title: str
+    category_path: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    offers_found: int
+    error_text: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AdminStats:
+    """Aggregate counters for admin /status."""
+
+    categories: int
+    active_categories: int
+    users: int
+    active_subscriptions: int
+    offers: int
 
 
 async def get_or_create_category(session: AsyncSession, info: CategoryInfo) -> Category:
@@ -405,3 +442,226 @@ async def list_aggregated_snapshots(
     ]
     aggregates.reverse()
     return aggregates
+
+
+async def list_category_subscriptions(
+    session: AsyncSession,
+    category_id: int,
+) -> list[Subscription]:
+    """Return active subscriptions of a category with user/category/server loaded."""
+    result = await session.scalars(
+        select(Subscription)
+        .where(
+            Subscription.category_id == category_id,
+            Subscription.is_active.is_(True),
+        )
+        .options(
+            selectinload(Subscription.user),
+            selectinload(Subscription.category),
+            selectinload(Subscription.server),
+        )
+        .order_by(Subscription.id)
+    )
+    return list(result)
+
+
+async def _category_snapshot_at(
+    session: AsyncSession,
+    category_id: int,
+    captured_at: datetime,
+) -> SnapshotPoint | None:
+    row = (
+        await session.execute(
+            select(
+                func.max(PriceSnapshot.id),
+                func.min(PriceSnapshot.min_price),
+                func.avg(PriceSnapshot.median_price),
+                func.sum(PriceSnapshot.offer_count),
+            ).where(
+                PriceSnapshot.category_id == category_id,
+                PriceSnapshot.captured_at == captured_at,
+            )
+        )
+    ).one()
+    if row[0] is None:
+        return None
+    return SnapshotPoint(
+        snapshot_id=int(row[0]),
+        captured_at=captured_at,
+        min_price=row[1],
+        median_price=row[2],
+        offer_count=int(row[3]),
+    )
+
+
+async def latest_snapshot_point(
+    session: AsyncSession,
+    category_id: int,
+    server_id: int | None = None,
+) -> SnapshotPoint | None:
+    """Return the newest snapshot for a category or one server.
+
+    For a category without a server the per-server snapshots of the newest
+    run are aggregated into one point.
+    """
+    if server_id is not None:
+        row = await session.scalar(
+            select(PriceSnapshot)
+            .where(
+                PriceSnapshot.category_id == category_id,
+                PriceSnapshot.server_id == server_id,
+            )
+            .order_by(PriceSnapshot.captured_at.desc(), PriceSnapshot.id.desc())
+            .limit(1)
+        )
+        if row is None:
+            return None
+        return SnapshotPoint(
+            snapshot_id=row.id,
+            captured_at=row.captured_at,
+            min_price=row.min_price,
+            median_price=row.median_price,
+            offer_count=row.offer_count,
+        )
+
+    captured_at = await session.scalar(
+        select(func.max(PriceSnapshot.captured_at)).where(PriceSnapshot.category_id == category_id)
+    )
+    if captured_at is None:
+        return None
+    return await _category_snapshot_at(session, category_id, captured_at)
+
+
+async def previous_snapshot_point(
+    session: AsyncSession,
+    category_id: int,
+    server_id: int | None,
+    before: datetime,
+) -> SnapshotPoint | None:
+    """Return the newest snapshot strictly older than ``before``."""
+    if server_id is not None:
+        row = await session.scalar(
+            select(PriceSnapshot)
+            .where(
+                PriceSnapshot.category_id == category_id,
+                PriceSnapshot.server_id == server_id,
+                PriceSnapshot.captured_at < before,
+            )
+            .order_by(PriceSnapshot.captured_at.desc(), PriceSnapshot.id.desc())
+            .limit(1)
+        )
+        if row is None:
+            return None
+        return SnapshotPoint(
+            snapshot_id=row.id,
+            captured_at=row.captured_at,
+            min_price=row.min_price,
+            median_price=row.median_price,
+            offer_count=row.offer_count,
+        )
+
+    captured_at = await session.scalar(
+        select(func.max(PriceSnapshot.captured_at)).where(
+            PriceSnapshot.category_id == category_id,
+            PriceSnapshot.captured_at < before,
+        )
+    )
+    if captured_at is None:
+        return None
+    return await _category_snapshot_at(session, category_id, captured_at)
+
+
+async def historical_min_price(
+    session: AsyncSession,
+    category_id: int,
+    server_id: int | None,
+    before: datetime,
+) -> Decimal | None:
+    """Return the lowest price seen before ``before``."""
+    statement = select(func.min(PriceSnapshot.min_price)).where(
+        PriceSnapshot.category_id == category_id,
+        PriceSnapshot.captured_at < before,
+    )
+    if server_id is not None:
+        statement = statement.where(PriceSnapshot.server_id == server_id)
+    return await session.scalar(statement)
+
+
+async def last_notification_at(
+    session: AsyncSession,
+    subscription_id: int,
+) -> datetime | None:
+    """Return when an alert for this subscription was last sent."""
+    return await session.scalar(
+        select(func.max(Notification.sent_at)).where(
+            Notification.subscription_id == subscription_id
+        )
+    )
+
+
+def add_notification(
+    session: AsyncSession,
+    *,
+    subscription_id: int,
+    snapshot_id: int,
+    price: Decimal,
+    reason: str,
+) -> Notification:
+    """Schedule a notification log row in the current transaction."""
+    notification = Notification(
+        subscription_id=subscription_id,
+        snapshot_id=snapshot_id,
+        price=price,
+        reason=reason,
+    )
+    session.add(notification)
+    return notification
+
+
+async def get_admin_stats(session: AsyncSession) -> AdminStats:
+    """Collect the counters shown by admin /status."""
+    categories = await session.scalar(select(func.count(Category.id)))
+    active_categories = await session.scalar(
+        select(func.count(Category.id)).where(Category.is_active.is_(True))
+    )
+    users = await session.scalar(select(func.count(User.id)))
+    active_subscriptions = await session.scalar(
+        select(func.count(Subscription.id)).where(Subscription.is_active.is_(True))
+    )
+    offers = await session.scalar(select(func.count(Offer.id)))
+    return AdminStats(
+        categories=int(categories or 0),
+        active_categories=int(active_categories or 0),
+        users=int(users or 0),
+        active_subscriptions=int(active_subscriptions or 0),
+        offers=int(offers or 0),
+    )
+
+
+async def list_recent_parse_runs(
+    session: AsyncSession,
+    *,
+    limit: int = 5,
+) -> list[ParseRunStatus]:
+    """Return the latest parse runs with category titles for admin /status."""
+    rows = (
+        await session.execute(
+            select(ParseRun, Category.title, Category.url_path)
+            .join(Category, ParseRun.category_id == Category.id)
+            .order_by(ParseRun.started_at.desc(), ParseRun.id.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        ParseRunStatus(
+            category_id=run.category_id,
+            category_title=title,
+            category_path=url_path,
+            status=run.status,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            offers_found=run.offers_found,
+            error_text=run.error_text,
+        )
+        for run, title, url_path in rows
+    ]

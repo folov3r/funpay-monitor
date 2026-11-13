@@ -62,6 +62,11 @@ class BotServices:
     session_factory: async_sessionmaker[AsyncSession]
     monitoring: MonitoringService
     history_days: int = 7
+    admin_vk_ids: frozenset[int] = frozenset()
+    alerts: Any = None
+
+    def is_admin(self, vk_id: int) -> bool:
+        return vk_id in self.admin_vk_ids
 
 
 def _payload(message: Message) -> dict[str, Any]:
