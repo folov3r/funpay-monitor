@@ -156,6 +156,7 @@ class Subscription(Base):
     """A user's alert rule for a category (optionally narrowed to one server)."""
 
     __tablename__ = "subscriptions"
+    __table_args__ = (Index("ix_subscriptions_category_active", "category_id", "is_active"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     user_id: Mapped[int] = mapped_column(
@@ -186,6 +187,7 @@ class Notification(Base):
     """Log of sent alerts, also used for per-subscription cooldown."""
 
     __tablename__ = "notifications"
+    __table_args__ = (Index("ix_notifications_subscription_sent", "subscription_id", "sent_at"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     subscription_id: Mapped[int] = mapped_column(
