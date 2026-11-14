@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from app.bot.cleanup import ChatCleaner
-from app.bot.subscriptions import BotServices, register_subscription_handlers
+from app.bot.subscriptions import BotServices, _import_category, register_subscription_handlers
+from app.db.repositories import PriceSummary
 from vkbottle.bot import Bot
 
 
@@ -143,3 +145,82 @@ async def test_confirm_keeps_the_dialog_when_saving_fails(
 
     assert deleted == []
     assert cleaner.tracked(777) == [100, 101, 102, 103, 104, 105]
+
+
+def make_import_services(imported: SimpleNamespace) -> BotServices:
+    async def fake_import(url_path: str) -> SimpleNamespace:
+        return imported
+
+    return BotServices(
+        session_factory=cast(Any, fake_session_factory),
+        monitoring=cast(Any, SimpleNamespace(import_category=fake_import)),
+    )
+
+
+def patch_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_summary(*args: Any, **kwargs: Any) -> PriceSummary:
+        return PriceSummary(Decimal("0.62"), Decimal("1.22"), 603)
+
+    async def fake_offers(*args: Any, **kwargs: Any) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(price=Decimal("0.62"), seller_name="ddegradationn", is_online=False)
+        ]
+
+    async def fake_servers(*args: Any, **kwargs: Any) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(id=1, name="Game Pass (5 дней)", funpay_server_id=2356),
+        ]
+
+    monkeypatch.setattr("app.bot.subscriptions.current_price_summary", fake_summary)
+    monkeypatch.setattr("app.bot.subscriptions.cheapest_offers", fake_offers)
+    monkeypatch.setattr("app.bot.subscriptions.list_servers", fake_servers)
+
+
+async def test_chips_category_shows_summary_before_the_server_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_summary(monkeypatch)
+    imported = SimpleNamespace(
+        category_id=2,
+        title="Робуксы Roblox",
+        url_path="/chips/99/",
+        offers_found=606,
+        item_types=(),
+        server_label="Способ передачи",
+    )
+    services = make_import_services(imported)
+    bot = make_bot(services)
+
+    message = FakeMessage(text="/add https://funpay.com/chips/99/")
+    await _import_category(bot, message, services, "/chips/99/")
+
+    texts = [text for text, _ in message.sent]
+    summary_index = next(index for index, text in enumerate(texts) if "Все предложения" in text)
+    server_index = next(
+        index for index, text in enumerate(texts) if "Выберите способ передачи" in text
+    )
+    assert summary_index < server_index
+    assert "Медиана: 1,22 ₽" in texts[summary_index]
+
+
+async def test_lots_category_defers_the_summary_until_the_item_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_summary(monkeypatch)
+    imported = SimpleNamespace(
+        category_id=1,
+        title="Fisch Roblox",
+        url_path="/lots/2932/",
+        offers_found=3001,
+        item_types=("предметы", "услуги"),
+        server_label=None,
+    )
+    services = make_import_services(imported)
+    bot = make_bot(services)
+
+    message = FakeMessage(text="/add https://funpay.com/lots/2932/")
+    await _import_category(bot, message, services, "/lots/2932/")
+
+    texts = [text for text, _ in message.sent]
+    assert not any("Медиана" in text for text in texts)
+    assert any("Что отслеживать?" in text for text in texts)

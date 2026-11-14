@@ -122,6 +122,35 @@ async def _reset_state(bot: Bot, message: Message) -> None:
     await bot.state_dispenser.delete(message.peer_id)
 
 
+async def _send_price_summary(
+    message: Message,
+    services: BotServices,
+    category_id: int,
+    *,
+    item_type: str | None,
+    query: str | None,
+) -> None:
+    """Show the current min/median/count slice right where the filter is known."""
+    async with services.session_factory() as session:
+        summary = await current_price_summary(
+            session,
+            category_id,
+            item_type=item_type,
+            query=query,
+        )
+        offers = await cheapest_offers(
+            session,
+            category_id,
+            item_type=item_type,
+            query=query,
+        )
+    await _answer(
+        message,
+        format_offer_summary(summary, offers, item_type=item_type, query=query),
+        services=services,
+    )
+
+
 async def _import_category(
     bot: Bot,
     message: Message,
@@ -167,6 +196,15 @@ async def _import_category(
     if imported.item_types:
         await _ask_item_type(bot, message, payload, services)
     else:
+        # /chips/ categories have no item types or name step, so the filter is
+        # known right away — show the whole-category slice before the server.
+        await _send_price_summary(
+            message,
+            services,
+            imported.category_id,
+            item_type=None,
+            query=None,
+        )
         await _ask_server(bot, message, payload, services)
 
 
@@ -443,28 +481,12 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
         payload = {**_payload(message), "query": normalize_query(message.text)}
         category_id = payload.get("category_id")
         if category_id is not None:
-            async with services.session_factory() as session:
-                summary = await current_price_summary(
-                    session,
-                    int(category_id),
-                    item_type=payload.get("item_type"),
-                    query=payload.get("query"),
-                )
-                offers = await cheapest_offers(
-                    session,
-                    int(category_id),
-                    item_type=payload.get("item_type"),
-                    query=payload.get("query"),
-                )
-            await _answer(
+            await _send_price_summary(
                 message,
-                format_offer_summary(
-                    summary,
-                    offers,
-                    item_type=payload.get("item_type"),
-                    query=payload.get("query"),
-                ),
-                services=services,
+                services,
+                int(category_id),
+                item_type=payload.get("item_type"),
+                query=payload.get("query"),
             )
         await _ask_server(bot, message, payload, services)
 
