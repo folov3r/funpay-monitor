@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -116,7 +117,9 @@ class MonitoringService:
         parsed page before opening the parse run, so the bot can offer servers
         for a category the worker has never seen before.
         """
+        started = time.perf_counter()
         parsed = await self._parser.fetch_category(url_path)
+        fetch_elapsed = time.perf_counter() - started
         status = PARSE_RUN_OK if parsed.offers else PARSE_RUN_ERROR
         error_text = (
             None if parsed.offers else "no offers found (possible markup change or bot protection)"
@@ -150,10 +153,12 @@ class MonitoringService:
             await session.commit()
 
         logger.info(
-            "Imported %s on demand: %s offers, %s snapshots",
+            "Imported %s on demand: %s offers, %s snapshots (fetch %.2fs, total %.2fs)",
             stored_path,
             len(parsed.offers),
             len(snapshots),
+            fetch_elapsed,
+            time.perf_counter() - started,
         )
         return ImportedCategory(
             category_id=category_id,

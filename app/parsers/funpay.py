@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+import time
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 
@@ -258,7 +260,18 @@ class FunPayParser(BaseParser):
     async def fetch_category(self, url_path: str) -> ParsedCategory:
         path = normalize_category_path(url_path)
         response = await self._http.get(f"{BASE_URL}{path}")
-        return self.parse_html(response.text, path)
+        # BeautifulSoup + lxml are CPU-bound and a busy category page (3000+
+        # offers) takes seconds to parse. Run it in a worker thread so a bot
+        # request does not stall Long Poll and other handlers on the event loop.
+        started = time.perf_counter()
+        parsed = await asyncio.to_thread(self.parse_html, response.text, path)
+        logger.debug(
+            "Parsed %s offers from %s in %.2fs",
+            len(parsed.offers),
+            path,
+            time.perf_counter() - started,
+        )
+        return parsed
 
     async def aclose(self) -> None:
         await self._http.aclose()
