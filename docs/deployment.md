@@ -10,6 +10,43 @@ docker compose up --build -d
 При работе от батареи отключите сон или используйте `systemd-inhibit`, иначе
 воркер перестанет парсить и алерты не придут.
 
+## Podman вместо Docker
+
+Podman подходит как замена Docker: он работает без демона и может запускаться
+rootless. Текущий `docker-compose.yml` совместим с Compose Spec, поэтому менять
+его не нужно.
+
+```bash
+sudo pacman -S podman
+systemctl --user enable --now podman.socket
+podman compose up --build -d
+podman compose ps
+podman compose logs -f bot worker
+```
+
+`podman compose` — обёртка над внешним провайдером. Если установлен
+`docker-compose`, используется он; Podman сам направляет его на свой сокет.
+Предупреждение о запуске внешней команды — нормальное.
+
+Остановка и удаление данных:
+
+```bash
+podman compose down
+podman compose down -v   # вместе с томом PostgreSQL
+```
+
+Важно:
+
+- порт `5432` должен быть свободен; локальный PostgreSQL нужно остановить или
+  поменять порт в compose-файле;
+- `restart: unless-stopped` работает, пока жив процесс Podman, но не включает
+  автозапуск после перезагрузки. Для продакшена сгенерируйте systemd user unit
+  (`podman generate systemd`) или используйте Quadlet;
+- если `docker-compose` не установлен, поставьте `podman-compose` и укажите
+  провайдер через `PODMAN_COMPOSE_PROVIDER=podman-compose`. Предпочтителен
+  `docker-compose`: он полностью поддерживает `depends_on.condition` и
+  `env_file` с `required: false`.
+
 ## VPS
 
 1. Установите Docker и Docker Compose.

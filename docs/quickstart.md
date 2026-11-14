@@ -44,6 +44,19 @@ docker compose logs -f bot worker
 - `bot` — Long Poll обработчик команд;
 - `worker` — планировщик парсинга и отправки алертов.
 
+### Если Docker недоступен: Podman
+
+```bash
+sudo pacman -S podman
+systemctl --user enable --now podman.socket
+podman compose up --build -d
+podman compose logs -f bot worker
+```
+
+Compose-файл менять не нужно: `podman compose` использует установленный
+`docker-compose` как провайдер и сам подключает его к сокету Podman. Порт `5432`
+должен быть свободен.
+
 ## Переменные окружения
 
 | Переменная | Обязательна | По умолчанию | Описание |
@@ -64,7 +77,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-docker compose up -d db
+docker compose up -d db   # или podman compose up -d db
 alembic upgrade head
 
 pytest
@@ -72,6 +85,11 @@ ruff check .
 python -m app.main     # бот
 python -m app.worker   # воркер, в отдельном терминале
 ```
+
+Если контейнеры недоступны, подойдёт локальный PostgreSQL 16: создайте базу,
+укажите её в `DATABASE_URL`, примените `alembic upgrade head` и запустите оба
+процесса. Воркер и бот общаются только через PostgreSQL, поэтому контейнеры не
+обязательны.
 
 ## Первая подписка
 

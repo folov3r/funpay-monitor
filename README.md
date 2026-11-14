@@ -35,6 +35,19 @@ docker compose up --build -d
 Сервис `migrate` применит миграции Alembic, после чего стартуют бот (Long Poll)
 и воркер (планировщик парсинга). Для бота нужен `VK_GROUP_TOKEN` в `.env`.
 
+### Если Docker недоступен: Podman
+
+```bash
+sudo pacman -S podman
+systemctl --user enable --now podman.socket
+podman compose up --build -d
+```
+
+`podman compose` использует установленный `docker-compose` как провайдер и сам
+подключает его к сокету Podman, поэтому compose-файл менять не нужно. Порт
+`5432` должен быть свободен; автозапуск после перезагрузки настраивается
+отдельно через systemd user unit или Quadlet.
+
 ### Локально
 
 ```bash
@@ -42,11 +55,14 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-docker compose up -d db   # PostgreSQL для локальной разработки
+docker compose up -d db   # или podman compose up -d db
 alembic upgrade head     # применить миграции
 
 pytest          # тесты
 ruff check .    # линтер
+
+python -m app.main      # бот
+python -m app.worker    # воркер, в отдельном терминале
 ```
 
 ## Переменные окружения
