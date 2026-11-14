@@ -43,6 +43,10 @@ class CategoryInfo:
     title: str
     url_path: str
     game_title: str | None = None
+    # Label of the page's main filter select: "Сервер" on most game-currency
+    # pages, but "Способ передачи" on e.g. Roblox robux. ``None`` when the
+    # page has no server select at all (many /lots/ categories).
+    server_label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

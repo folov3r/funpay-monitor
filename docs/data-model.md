@@ -41,6 +41,7 @@ categories 1 ─── * price_snapshots ─── 1 servers ──────�
 | `title` | varchar(255) | название с сайта |
 | `game_title` | varchar(255) | игра, если определилась |
 | `url_path` | varchar(255) | нормализованный путь `/chips/30/` |
+| `server_label` | varchar(64) | подпись поля выбора с FunPay: «Сервер», «Способ передачи»; `NULL` — поля нет |
 | `is_active` | boolean | участвует ли в расписании |
 | `last_parsed_at` | timestamptz | последний успешный разбор |
 

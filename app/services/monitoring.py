@@ -59,6 +59,7 @@ class ImportedCategory:
     offers_found: int
     snapshots_created: int
     item_types: tuple[str, ...] = ()
+    server_label: str | None = None
 
 
 class MonitoringService:
@@ -167,6 +168,7 @@ class MonitoringService:
             offers_found=len(parsed.offers),
             snapshots_created=len(snapshots),
             item_types=parsed.item_types,
+            server_label=parsed.category.server_label,
         )
 
     async def run_category(self, category: CategoryRef) -> ParseOutcome:

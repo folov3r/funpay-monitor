@@ -183,10 +183,19 @@ def format_threshold(subscription: Subscription) -> str:
     return format_condition(subscription.mode, subscription.threshold)
 
 
-def format_server_name(subscription: Subscription) -> str:
+def format_server_field(subscription: Subscription) -> str | None:
+    """Render the server/delivery field with the label taken from FunPay.
+
+    FunPay calls the same select "Сервер" on Albion and "Способ передачи" on
+    Roblox, so the label is stored per category. ``None`` means the category
+    has no such field at all (many /lots/ pages), and the line is omitted.
+    """
+    label = getattr(subscription.category, "server_label", None)
+    if not label:
+        return None
     if subscription.server is not None:
-        return subscription.server.name
-    return "любой сервер"
+        return f"{label}: {subscription.server.name}"
+    return f"{label}: любой"
 
 
 def format_subscription_line(
@@ -196,10 +205,13 @@ def format_subscription_line(
     current = (
         f"сейчас {format_money(summary.min_price)}" if summary is not None else "нет данных о цене"
     )
-    details = [format_server_name(subscription)]
+    details = []
     filter_label = format_subscription_filter(subscription)
     if filter_label:
-        details.insert(0, filter_label)
+        details.append(filter_label)
+    server_field = format_server_field(subscription)
+    if server_field:
+        details.append(server_field)
     details.extend([format_threshold(subscription), current])
     return f"#{subscription.id} · {subscription.category.title}\n   " + " · ".join(details)
 
@@ -225,12 +237,10 @@ def format_stats_text(
     filter_label = format_subscription_filter(subscription)
     if filter_label:
         lines.append(f"Фильтр: {filter_label}")
-    lines.extend(
-        [
-            f"Сервер: {format_server_name(subscription)}",
-            f"Условие: {format_threshold(subscription)}",
-        ]
-    )
+    server_field = format_server_field(subscription)
+    if server_field:
+        lines.append(server_field)
+    lines.append(f"Условие: {format_threshold(subscription)}")
     if current is not None:
         lines.append(
             f"Сейчас: {format_money(current.min_price)} "

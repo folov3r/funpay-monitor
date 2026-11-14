@@ -116,6 +116,7 @@ async def get_or_create_category(session: AsyncSession, info: CategoryInfo) -> C
             title=info.title,
             game_title=info.game_title,
             url_path=info.url_path,
+            server_label=info.server_label,
             is_active=True,
         )
         session.add(category)
@@ -124,6 +125,7 @@ async def get_or_create_category(session: AsyncSession, info: CategoryInfo) -> C
 
     category.title = info.title
     category.url_path = info.url_path
+    category.server_label = info.server_label
     if info.game_title:
         category.game_title = info.game_title
     return category

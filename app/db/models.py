@@ -55,6 +55,8 @@ class Category(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     game_title: Mapped[str | None] = mapped_column(String(255))
     url_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Human label of the page's filter select ("Сервер", "Способ передачи", …).
+    server_label: Mapped[str | None] = mapped_column(String(64))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False)
     last_parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

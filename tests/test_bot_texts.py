@@ -202,6 +202,7 @@ def make_subscription(
     mode: str = "abs",
     threshold: Decimal | None = Decimal("100"),
     server_name: str | None = "EU",
+    server_label: str | None = "Сервер",
     item_type: str | None = None,
     query: str | None = None,
 ) -> SimpleNamespace:
@@ -211,7 +212,7 @@ def make_subscription(
         threshold=threshold,
         item_type=item_type,
         query=query,
-        category=SimpleNamespace(title="Серебро"),
+        category=SimpleNamespace(title="Серебро", server_label=server_label),
         server=SimpleNamespace(name=server_name) if server_name else None,
     )
 
@@ -226,7 +227,7 @@ def test_format_subscription_list() -> None:
     assert "EU" in text
     assert "сейчас 95,00 ₽" in text
     assert "#2 · Серебро" in text
-    assert "любой сервер" in text
+    assert "Сервер: любой" in text
     assert "нет данных о цене" in text
 
 
@@ -242,7 +243,30 @@ def test_format_subscription_list_shows_filter() -> None:
         {1: PriceSummary(Decimal("95"), Decimal("110"), 12)},
     )
 
-    assert "Предметы · «plush nessie» · EU" in text
+    assert "Предметы · «plush nessie» · Сервер: EU" in text
+
+
+def test_format_subscription_list_uses_page_server_label() -> None:
+    subscription = make_subscription(server_label="Способ передачи", server_name="Game Pass")
+
+    text = format_subscription_list(
+        [subscription],
+        {1: PriceSummary(Decimal("95"), Decimal("110"), 12)},
+    )
+
+    assert "Способ передачи: Game Pass" in text
+
+
+def test_format_subscription_list_omits_server_for_lot_categories() -> None:
+    subscription = make_subscription(server_label=None, server_name=None)
+
+    text = format_subscription_list(
+        [subscription],
+        {1: PriceSummary(Decimal("95"), Decimal("110"), 12)},
+    )
+
+    assert "Сервер" not in text
+    assert "любой" not in text
 
 
 def test_format_stats_text_shows_filter() -> None:

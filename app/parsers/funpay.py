@@ -195,6 +195,22 @@ def _parse_server(item: Tag) -> tuple[int, str]:
     return server_id, server_name
 
 
+def _server_select_label(soup: BeautifulSoup) -> str | None:
+    """Return the human label of the main filter select, e.g. "Способ передачи".
+
+    FunPay reuses ``<select name="server">`` for different concepts: on Albion
+    it lists game servers, on Roblox it lists delivery methods. The first
+    (empty-value) option carries the real label shown to the user.
+    """
+    select = soup.select_one('select[name="server"]')
+    if select is None:
+        return None
+    placeholder = select.select_one("option")
+    if placeholder is None or placeholder.get("value") not in {"", None}:
+        return None
+    return _text(placeholder) or None
+
+
 def _parse_seller_id(item: Tag) -> int | None:
     raw_id = item.get("data-user")
     if isinstance(raw_id, str) and raw_id.isdigit():
@@ -301,6 +317,7 @@ class FunPayParser(BaseParser):
             type=CATEGORY_TYPE_BY_SEGMENT[segment],
             title=title,
             url_path=path,
+            server_label=_server_select_label(soup),
         )
         logger.debug("Parsed %s offers from %s", len(offers), path)
         return ParsedCategory(category=category, offers=offers)

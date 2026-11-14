@@ -29,7 +29,7 @@ from app.bot.texts import (
     format_condition,
     format_item_type,
     format_offer_filter,
-    format_server_name,
+    format_server_field,
     format_stats_text,
     format_subscription_list,
     is_add_command,
@@ -91,6 +91,11 @@ def _server_options(servers: list[Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _server_label(payload: dict[str, Any]) -> str:
+    """Human label of the page filter, e.g. "Сервер" or "Способ передачи"."""
+    return str(payload.get("server_label") or "Сервер")
+
+
 async def _reset_state(bot: Bot, message: Message) -> None:
     await bot.state_dispenser.delete(message.peer_id)
 
@@ -123,6 +128,7 @@ async def _import_category(
         "offers_found": imported.offers_found,
         "servers": _server_options(servers),
         "item_types": list(imported.item_types),
+        "server_label": imported.server_label,
     }
     await message.answer(f"Категория «{imported.title}»: {imported.offers_found} офферов.")
 
@@ -171,8 +177,10 @@ async def _ask_server(
 ) -> None:
     options = payload.get("servers") or []
     if not options:
-        await message.answer("Серверы не нашлись, поэтому подписка будет на любой сервер.")
-        await _ask_mode(bot, message, payload, server_id=None, server_name="любой сервер")
+        await message.answer(
+            "У этой категории нет выбора сервера — подписка будет на все предложения."
+        )
+        await _ask_mode(bot, message, payload, server_id=None, server_name=None)
         return
 
     await bot.state_dispenser.set(
@@ -180,9 +188,10 @@ async def _ask_server(
         AddSubscriptionStates.WAITING_SERVER,
         **_state_kwargs(payload),
     )
+    label = _server_label(payload)
     names = [option["name"] for option in options]
     await message.answer(
-        "Выберите сервер (можно прислать название текстом):",
+        f"Выберите {label.lower()} (можно прислать название текстом):",
         keyboard=servers_keyboard(names),
     )
 
@@ -193,7 +202,7 @@ async def _ask_mode(
     payload: dict[str, Any],
     *,
     server_id: int | None,
-    server_name: str,
+    server_name: str | None,
 ) -> None:
     next_payload = {
         **payload,
@@ -220,7 +229,8 @@ async def _ask_confirm(
     threshold_raw = payload.get("threshold")
     threshold = Decimal(str(threshold_raw)) if threshold_raw is not None else None
     condition = format_condition(mode, threshold)
-    server_name = str(payload.get("server_name") or "любой сервер")
+    server_name = payload.get("server_name")
+    server_label = payload.get("server_label")
     title = str(payload.get("category_title") or "категория")
     filter_label = format_offer_filter(
         payload.get("item_type"),
@@ -230,7 +240,9 @@ async def _ask_confirm(
     lines = [f"Проверьте подписку:\n\n{title}"]
     if filter_label:
         lines.append(f"Фильтр: {filter_label}")
-    lines.extend([f"Сервер: {server_name}", f"Условие: {condition}"])
+    if server_label and server_name:
+        lines.append(f"{server_label}: {server_name}")
+    lines.append(f"Условие: {condition}")
 
     await bot.state_dispenser.set(
         message.peer_id,
@@ -384,7 +396,7 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
                 message,
                 payload,
                 server_id=None,
-                server_name="любой сервер",
+                server_name="любой",
             )
             return
 
@@ -393,8 +405,9 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
             None,
         )
         if chosen is None:
+            label = _server_label(payload)
             await message.answer(
-                "Выберите сервер кнопкой или пришлите его название.",
+                f"Выберите {label.lower()} кнопкой или пришлите его название.",
                 keyboard=servers_keyboard([option["name"] for option in options]),
             )
             return
@@ -572,7 +585,9 @@ async def _send_stats(
     title_parts = [subscription.category.title]
     if filter_label:
         title_parts.append(filter_label)
-    title_parts.append(format_server_name(subscription))
+    server_field = format_server_field(subscription)
+    if server_field:
+        title_parts.append(server_field)
     image = await render_price_chart_async(
         points,
         title=" · ".join(title_parts),

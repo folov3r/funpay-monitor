@@ -181,6 +181,28 @@ def test_parse_offer_item_type_method_and_exact_price(parser: FunPayParser) -> N
     assert parsed.item_types == ("предметы",)
 
 
+def test_parse_server_select_label(parser: FunPayParser) -> None:
+    html = """
+    <html><body>
+    <h1>Робуксы</h1>
+    <select name="server">
+      <option value="">Способ передачи</option>
+      <option value="1000000">Подарочные карты (мгновенно)</option>
+    </select>
+    </body></html>
+    """
+
+    parsed = parser.parse_html(html, "/chips/99/")
+
+    assert parsed.category.server_label == "Способ передачи"
+
+
+def test_parse_without_server_select_has_no_label(parser: FunPayParser) -> None:
+    parsed = parser.parse_html(load_fixture("lots_13.html"), "/lots/13/")
+
+    assert parsed.category.server_label is None
+
+
 def test_parse_empty_category(parser: FunPayParser) -> None:
     parsed = parser.parse_html(load_fixture("empty_category.html"), "/chips/999/")
 
