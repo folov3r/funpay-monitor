@@ -238,7 +238,7 @@ def format_offer_summary(
     Median is used instead of the mean on purpose: bundle lots like
     "1000 items for 1017 ₽" skew the average by an order of magnitude.
     """
-    label = format_offer_filter(item_type, query) or "все предложения"
+    label = format_offer_filter(item_type, query) or "Все предложения"
     if summary is None:
         return f"По фильтру {label} сейчас нет предложений."
 
