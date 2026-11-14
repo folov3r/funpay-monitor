@@ -94,8 +94,9 @@ async def test_confirm_deletes_dialog_but_keeps_the_final_message(
 
     deleted: list[list[int]] = []
 
-    async def fake_delete(api: Any, peer_id: int, cmids: list[int]) -> None:
+    async def fake_delete(api: Any, peer_id: int, cmids: list[int]) -> list[SimpleNamespace]:
         deleted.append(cmids)
+        return [SimpleNamespace(conversation_message_id=cmid, error=None) for cmid in cmids]
 
     cleaner = ChatCleaner()
     cleaner.track(777, [100, 101, 102, 103, 104])
@@ -126,8 +127,9 @@ async def test_confirm_keeps_the_dialog_when_saving_fails(
 
     deleted: list[list[int]] = []
 
-    async def fake_delete(api: Any, peer_id: int, cmids: list[int]) -> None:
+    async def fake_delete(api: Any, peer_id: int, cmids: list[int]) -> list[SimpleNamespace]:
         deleted.append(cmids)
+        return [SimpleNamespace(conversation_message_id=cmid, error=None) for cmid in cmids]
 
     cleaner = ChatCleaner()
     cleaner.track(777, [100, 101, 102, 103, 104])

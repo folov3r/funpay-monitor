@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from typing import Any
 
 from vkbottle import API, VKAPIError
 
 logger = logging.getLogger(__name__)
 
-#: VK refuses to delete a message for everybody when the peer already removed
-#: it or the community is not allowed to; the bot silently gives up on it.
+#: VK can reject a whole ``messages.delete`` call when one message in it cannot
+#: be removed for everybody (e.g. an already deleted peer message). Real
+#: per-message refusals usually come back as ``error`` items in the response
+#: (code 15 "message can not be deleted (peer message)") and are skipped too.
 CANNOT_DELETE_FOR_ALL = 924
 #: ``messages.delete`` accepts up to 100 conversation message ids per call.
 DELETE_BATCH_SIZE = 100
@@ -84,38 +87,52 @@ class ChatCleaner:
 
     async def _delete_batch(self, api: API, peer_id: int, cmids: list[int]) -> int:
         try:
-            await self._delete(api, peer_id, cmids)
-            return len(cmids)
+            items = await self._delete(api, peer_id, cmids)
         except VKAPIError as error:
             if error.code != CANNOT_DELETE_FOR_ALL:
                 logger.warning("Could not delete dialog messages in peer %s: %s", peer_id, error)
                 return 0
+            items = None
         except Exception:  # pragma: no cover - network failure must not break /add
             logger.exception("Unexpected error while deleting dialog messages in peer %s", peer_id)
             return 0
 
-        # One message in the batch belongs to the user and cannot be removed for
+        if items is not None:
+            return self._count_deleted(items, peer_id)
+
+        # VK rejected the whole batch because one message cannot be removed for
         # everybody. Retry one by one so the bot's own messages still disappear.
         deleted = 0
         for cmid in cmids:
             try:
-                await self._delete(api, peer_id, [cmid])
-                deleted += 1
+                items = await self._delete(api, peer_id, [cmid])
             except VKAPIError as error:
-                if error.code == CANNOT_DELETE_FOR_ALL:
-                    logger.debug(
-                        "Message %s in peer %s cannot be deleted for everybody", cmid, peer_id
-                    )
-                else:
-                    logger.warning(
-                        "Could not delete message %s in peer %s: %s", cmid, peer_id, error
-                    )
+                logger.debug("Could not delete message %s in peer %s: %s", cmid, peer_id, error)
+                continue
             except Exception:  # pragma: no cover - network failure must not break /add
                 logger.exception("Unexpected error while deleting message %s", cmid)
+                continue
+            deleted += self._count_deleted(items, peer_id)
         return deleted
 
-    async def _delete(self, api: API, peer_id: int, cmids: list[int]) -> None:
-        await api.messages.delete(
+    def _count_deleted(self, items: list[Any], peer_id: int) -> int:
+        """Count real deletions; VK reports refusals as per-item errors."""
+        deleted = 0
+        for item in items:
+            error = getattr(item, "error", None)
+            if error is None:
+                deleted += 1
+                continue
+            logger.debug(
+                "VK did not delete message %s in peer %s: %s",
+                getattr(item, "conversation_message_id", "?"),
+                peer_id,
+                error,
+            )
+        return deleted
+
+    async def _delete(self, api: API, peer_id: int, cmids: list[int]) -> list[Any]:
+        return await api.messages.delete(
             peer_id=peer_id,
             cmids=cmids,
             delete_for_all=True,
