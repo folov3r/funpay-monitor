@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     parse_interval_minutes: int = Field(default=15, ge=1)
     request_delay_seconds: float = Field(default=3.0, ge=0)
     alert_cooldown_hours: int = Field(default=6, ge=0)
+    #: Delete the /add dialog messages after a subscription is saved. Kept as a
+    #: flag so the cleanup can be rolled back without touching the handlers.
+    chat_cleanup_enabled: bool = True
 
     def admin_vk_ids(self) -> frozenset[int]:
         """Parse ``VK_ADMIN_IDS`` as a comma/space separated set of VK ids."""

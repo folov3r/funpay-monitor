@@ -37,6 +37,8 @@ async def run() -> None:
         parser=parser,
         admin_vk_ids=settings.admin_vk_ids(),
         alert_cooldown_hours=settings.alert_cooldown_hours,
+        chat_cleanup_enabled=settings.chat_cleanup_enabled,
+        group_id=settings.vk_group_id,
     )
 
     stop_event = asyncio.Event()

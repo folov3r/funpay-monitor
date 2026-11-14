@@ -69,6 +69,7 @@ Compose-файл менять не нужно: `podman compose` использу
 | `PARSE_INTERVAL_MINUTES` | нет | `15` | Интервал парсинга |
 | `REQUEST_DELAY_SECONDS` | нет | `3` | Пауза между запросами к FunPay |
 | `ALERT_COOLDOWN_HOURS` | нет | `6` | Кулдаун алертов на подписку |
+| `CHAT_CLEANUP_ENABLED` | нет | `true` | Удалять сообщения диалога `/add` после успешного сохранения |
 
 ## Локальная разработка
 

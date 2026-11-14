@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from vkbottle.bot import Bot, Message
 
+from app.bot.cleanup import ChatCleaner
 from app.bot.keyboards import (
     ANY_SERVER_LABEL,
     cancel_keyboard,
@@ -73,6 +74,7 @@ class BotServices:
     history_days: int = 7
     admin_vk_ids: frozenset[int] = frozenset()
     alerts: Any = None
+    cleaner: ChatCleaner = field(default_factory=ChatCleaner)
 
     def is_admin(self, vk_id: int) -> bool:
         return vk_id in self.admin_vk_ids
@@ -85,6 +87,24 @@ def _payload(message: Message) -> dict[str, Any]:
 
 def _state_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key != "state"}
+
+
+def _track_dialog(services: BotServices, message: Message) -> None:
+    """Remember the user's message so it can be deleted after a successful save."""
+    services.cleaner.track(message.peer_id, [message.conversation_message_id])
+
+
+async def _answer(
+    message: Message,
+    text: str,
+    *,
+    services: BotServices,
+    **kwargs: Any,
+) -> Any:
+    """Send a dialog message and remember it for the chat cleanup."""
+    sent = await message.answer(text, **kwargs)
+    services.cleaner.track(message.peer_id, [sent.conversation_message_id])
+    return sent
 
 
 def _server_options(servers: list[Any]) -> list[dict[str, Any]]:
@@ -108,14 +128,20 @@ async def _import_category(
     services: BotServices,
     url_path: str,
 ) -> None:
-    await message.answer("Проверяю категорию на FunPay, это может занять несколько секунд…")
+    await _answer(
+        message,
+        "Проверяю категорию на FunPay, это может занять несколько секунд…",
+        services=services,
+    )
     try:
         imported = await services.monitoring.import_category(url_path)
     except Exception:
         logger.exception("Could not import category %s", url_path)
-        await message.answer(
+        await _answer(
+            message,
             "Не удалось загрузить страницу FunPay. Проверьте, что ссылка ведёт "
             "на категорию /chips/… или /lots/…, и попробуйте ещё раз.",
+            services=services,
             keyboard=main_menu_keyboard(),
         )
         return
@@ -132,18 +158,23 @@ async def _import_category(
         "item_types": list(imported.item_types),
         "server_label": imported.server_label,
     }
-    await message.answer(f"Категория «{imported.title}»: {imported.offers_found} офферов.")
+    await _answer(
+        message,
+        f"Категория «{imported.title}»: {imported.offers_found} офферов.",
+        services=services,
+    )
 
     if imported.item_types:
-        await _ask_item_type(bot, message, payload)
+        await _ask_item_type(bot, message, payload, services)
     else:
-        await _ask_server(bot, message, payload)
+        await _ask_server(bot, message, payload, services)
 
 
 async def _ask_item_type(
     bot: Bot,
     message: Message,
     payload: dict[str, Any],
+    services: BotServices,
 ) -> None:
     await bot.state_dispenser.set(
         message.peer_id,
@@ -153,8 +184,10 @@ async def _ask_item_type(
     labels = [
         format_item_type(item_type) or item_type for item_type in payload.get("item_types") or []
     ]
-    await message.answer(
+    await _answer(
+        message,
         "Что отслеживать? Выберите тип предложений:",
+        services=services,
         keyboard=item_types_keyboard(labels),
     )
 
@@ -163,26 +196,30 @@ async def _ask_query(
     bot: Bot,
     message: Message,
     payload: dict[str, Any],
+    services: BotServices,
 ) -> None:
     await bot.state_dispenser.set(
         message.peer_id,
         AddSubscriptionStates.WAITING_QUERY,
         **_state_kwargs(payload),
     )
-    await message.answer(QUERY_PROMPT, keyboard=query_keyboard())
+    await _answer(message, QUERY_PROMPT, services=services, keyboard=query_keyboard())
 
 
 async def _ask_server(
     bot: Bot,
     message: Message,
     payload: dict[str, Any],
+    services: BotServices,
 ) -> None:
     options = payload.get("servers") or []
     if not options:
-        await message.answer(
-            "У этой категории нет выбора сервера — подписка будет на все предложения."
+        await _answer(
+            message,
+            "У этой категории нет выбора сервера — подписка будет на все предложения.",
+            services=services,
         )
-        await _ask_mode(bot, message, payload, server_id=None, server_name=None)
+        await _ask_mode(bot, message, payload, services, server_id=None, server_name=None)
         return
 
     await bot.state_dispenser.set(
@@ -192,8 +229,10 @@ async def _ask_server(
     )
     label = _server_label(payload)
     names = [option["name"] for option in options]
-    await message.answer(
+    await _answer(
+        message,
         f"Выберите {label.lower()} (можно прислать название текстом):",
+        services=services,
         keyboard=servers_keyboard(names),
     )
 
@@ -202,6 +241,7 @@ async def _ask_mode(
     bot: Bot,
     message: Message,
     payload: dict[str, Any],
+    services: BotServices,
     *,
     server_id: int | None,
     server_name: str | None,
@@ -216,8 +256,10 @@ async def _ask_mode(
         AddSubscriptionStates.WAITING_MODE,
         **_state_kwargs(next_payload),
     )
-    await message.answer(
+    await _answer(
+        message,
         "Когда присылать уведомление?",
+        services=services,
         keyboard=modes_keyboard(),
     )
 
@@ -226,6 +268,7 @@ async def _ask_confirm(
     bot: Bot,
     message: Message,
     payload: dict[str, Any],
+    services: BotServices,
 ) -> None:
     mode = str(payload.get("mode", "abs"))
     threshold_raw = payload.get("threshold")
@@ -251,8 +294,10 @@ async def _ask_confirm(
         AddSubscriptionStates.WAITING_CONFIRM,
         **_state_kwargs(payload),
     )
-    await message.answer(
+    await _answer(
+        message,
         "\n".join(lines),
+        services=services,
         keyboard=confirm_keyboard(),
     )
 
@@ -287,6 +332,8 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
 
     @bot.on.message(func=lambda message: is_add_command(message.text))
     async def add_handler(message: Message, user_id: int) -> None:
+        services.cleaner.reset(message.peer_id)
+        _track_dialog(services, message)
         _, argument = split_command(message.text)
         path = extract_category_path(argument)
         if path is None:
@@ -294,8 +341,10 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
                 message.peer_id,
                 AddSubscriptionStates.WAITING_LINK,
             )
-            await message.answer(
+            await _answer(
+                message,
                 "Пришлите ссылку на категорию FunPay, например https://funpay.com/chips/30/",
+                services=services,
                 keyboard=cancel_keyboard(),
             )
             return
@@ -303,6 +352,7 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
 
     @bot.on.message(func=lambda message: extract_category_path(message.text) is not None)
     async def link_handler(message: Message, user_id: int) -> None:
+        _track_dialog(services, message)
         path = extract_category_path(message.text)
         if path is None:  # pragma: no cover - guarded by the rule above
             return
@@ -311,16 +361,19 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
     @bot.on.message(func=lambda message: is_cancel(message.text))
     async def cancel_handler(message: Message, user_id: int) -> None:
         await _reset_state(bot, message)
+        services.cleaner.forget(message.peer_id)
         await message.answer("Отменено.", keyboard=main_menu_keyboard())
 
     @bot.on.message(func=lambda message: is_list_command(message.text))
     async def list_handler(message: Message, user_id: int) -> None:
         await _reset_state(bot, message)
+        services.cleaner.forget(message.peer_id)
         await _send_subscription_list(message, services, user_id)
 
     @bot.on.message(func=lambda message: is_stats_command(message.text))
     async def stats_handler(message: Message, user_id: int) -> None:
         await _reset_state(bot, message)
+        services.cleaner.forget(message.peer_id)
         _, argument = split_command(message.text)
         subscription_id = parse_subscription_id(argument)
         if subscription_id is None:
@@ -331,6 +384,7 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
     @bot.on.message(func=lambda message: is_unsubscribe_command(message.text))
     async def unsubscribe_handler(message: Message, user_id: int) -> None:
         await _reset_state(bot, message)
+        services.cleaner.forget(message.peer_id)
         _, argument = split_command(message.text)
         subscription_id = parse_subscription_id(argument)
         if subscription_id is None:
@@ -354,10 +408,13 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_LINK)
     async def waiting_link_handler(message: Message, user_id: int) -> None:
+        _track_dialog(services, message)
         path = extract_category_path(message.text)
         if path is None:
-            await message.answer(
+            await _answer(
+                message,
                 "Не вижу ссылку FunPay. Пришлите, например, https://funpay.com/chips/30/",
+                services=services,
                 keyboard=cancel_keyboard(),
             )
             return
@@ -365,20 +422,24 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_ITEM_TYPE)
     async def waiting_item_type_handler(message: Message, user_id: int) -> None:
+        _track_dialog(services, message)
         payload = _payload(message)
         available = payload.get("item_types") or []
         matched, item_type = item_type_from_label(message.text, available)
         if not matched:
             labels = [format_item_type(value) or value for value in available]
-            await message.answer(
+            await _answer(
+                message,
                 "Выберите тип кнопкой.",
+                services=services,
                 keyboard=item_types_keyboard(labels),
             )
             return
-        await _ask_query(bot, message, {**payload, "item_type": item_type})
+        await _ask_query(bot, message, {**payload, "item_type": item_type}, services)
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_QUERY)
     async def waiting_query_handler(message: Message, user_id: int) -> None:
+        _track_dialog(services, message)
         payload = {**_payload(message), "query": normalize_query(message.text)}
         category_id = payload.get("category_id")
         if category_id is not None:
@@ -395,18 +456,21 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
                     item_type=payload.get("item_type"),
                     query=payload.get("query"),
                 )
-            await message.answer(
+            await _answer(
+                message,
                 format_offer_summary(
                     summary,
                     offers,
                     item_type=payload.get("item_type"),
                     query=payload.get("query"),
-                )
+                ),
+                services=services,
             )
-        await _ask_server(bot, message, payload)
+        await _ask_server(bot, message, payload, services)
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_SERVER)
     async def waiting_server_handler(message: Message, user_id: int) -> None:
+        _track_dialog(services, message)
         payload = _payload(message)
         text = normalize_text(message.text)
         options = payload.get("servers") or []
@@ -416,6 +480,7 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
                 bot,
                 message,
                 payload,
+                services,
                 server_id=None,
                 server_name="любой",
             )
@@ -427,8 +492,10 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
         )
         if chosen is None:
             label = _server_label(payload)
-            await message.answer(
+            await _answer(
+                message,
                 f"Выберите {label.lower()} кнопкой или пришлите его название.",
+                services=services,
                 keyboard=servers_keyboard([option["name"] for option in options]),
             )
             return
@@ -437,23 +504,27 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
             bot,
             message,
             payload,
+            services,
             server_id=int(chosen["id"]),
             server_name=str(chosen["name"]),
         )
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_MODE)
     async def waiting_mode_handler(message: Message, user_id: int) -> None:
+        _track_dialog(services, message)
         mode = mode_from_label(message.text)
         if mode is None:
-            await message.answer(
+            await _answer(
+                message,
                 "Выберите условие кнопкой.",
+                services=services,
                 keyboard=modes_keyboard(),
             )
             return
 
         payload = _payload(message)
         if mode == "lowest":
-            await _ask_confirm(bot, message, {**payload, "mode": mode, "threshold": None})
+            await _ask_confirm(bot, message, {**payload, "mode": mode, "threshold": None}, services)
             return
 
         await bot.state_dispenser.set(
@@ -466,10 +537,11 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
             if mode == "abs"
             else "Введите процент падения, например 5 или 7,5:"
         )
-        await message.answer(prompt, keyboard=cancel_keyboard())
+        await _answer(message, prompt, services=services, keyboard=cancel_keyboard())
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_THRESHOLD)
     async def waiting_threshold_handler(message: Message, user_id: int) -> None:
+        _track_dialog(services, message)
         payload = _payload(message)
         mode = str(payload.get("mode", "abs"))
         threshold = parse_threshold(message.text or "", mode)
@@ -479,20 +551,24 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
                 if mode == "pct"
                 else "Нужно положительное число, например 1450 или 1450,50."
             )
-            await message.answer(hint, keyboard=cancel_keyboard())
+            await _answer(message, hint, services=services, keyboard=cancel_keyboard())
             return
 
         await _ask_confirm(
             bot,
             message,
             {**payload, "threshold": str(threshold)},
+            services,
         )
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_CONFIRM)
     async def waiting_confirm_handler(message: Message, user_id: int) -> None:
+        _track_dialog(services, message)
         if normalize_text(message.text) not in {"сохранить", "да", "подтвердить"}:
-            await message.answer(
+            await _answer(
+                message,
                 "Нажмите «Сохранить» или «Отмена».",
+                services=services,
                 keyboard=confirm_keyboard(),
             )
             return
@@ -502,6 +578,7 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
         mode = payload.get("mode")
         if category_id is None or mode not in {"abs", "pct", "lowest"}:
             await _reset_state(bot, message)
+            services.cleaner.forget(message.peer_id)
             await message.answer(
                 "Что-то потерялось в диалоге. Начните заново: /add",
                 keyboard=main_menu_keyboard(),
@@ -526,10 +603,23 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
             subscription_id = subscription.id
 
         await _reset_state(bot, message)
-        await message.answer(
+        sent = await _answer(
+            message,
             f"Подписка #{subscription_id} сохранена. "
             "Как только воркер соберёт свежие цены, бот проверит условие.",
+            services=services,
             keyboard=main_menu_keyboard(),
+        )
+        deleted = await services.cleaner.purge(
+            bot.api,
+            message.peer_id,
+            keep=[sent.conversation_message_id],
+        )
+        logger.info(
+            "Saved subscription %s for peer %s, cleaned up %s dialog messages",
+            subscription_id,
+            message.peer_id,
+            deleted,
         )
 
 

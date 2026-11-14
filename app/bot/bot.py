@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from vkbottle.bot import Bot
 
 from app.bot.admin import register_admin_handlers
+from app.bot.cleanup import ChatCleaner
 from app.bot.common import register_common_handlers, register_fallback_handler
 from app.bot.middlewares import user_middleware
 from app.bot.subscriptions import BotServices, register_subscription_handlers
@@ -23,6 +24,8 @@ def create_bot(
     history_days: int = 7,
     admin_vk_ids: frozenset[int] = frozenset(),
     alert_cooldown_hours: int = 6,
+    chat_cleanup_enabled: bool = True,
+    group_id: int = 0,
 ) -> Bot:
     """Create a bot with all handlers registered.
 
@@ -42,6 +45,7 @@ def create_bot(
             VkAlertNotifier(bot.api),
             cooldown_hours=alert_cooldown_hours,
         ),
+        cleaner=ChatCleaner(enabled=chat_cleanup_enabled, group_id=group_id),
     )
 
     register_common_handlers(bot)
