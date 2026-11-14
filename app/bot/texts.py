@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
 from statistics import median
 
-from app.db.models import Subscription
+from app.db.models import Offer, Subscription
 from app.db.repositories import PriceSummary
 from app.parsers.funpay import normalize_category_path
 from app.services.charts import ChartPoint
@@ -224,6 +224,38 @@ def format_subscription_list(
         return "У вас пока нет активных подписок. Пришлите ссылку FunPay или нажмите «Добавить»."
     lines = [format_subscription_line(sub, summaries.get(sub.id)) for sub in subscriptions]
     return "Ваши подписки:\n\n" + "\n\n".join(lines)
+
+
+def format_offer_summary(
+    summary: PriceSummary | None,
+    offers: Sequence[Offer],
+    *,
+    item_type: str | None,
+    query: str | None,
+) -> str:
+    """Immediate price snapshot shown right after the user names an item.
+
+    Median is used instead of the mean on purpose: bundle lots like
+    "1000 items for 1017 ₽" skew the average by an order of magnitude.
+    """
+    label = format_offer_filter(item_type, query) or "все предложения"
+    if summary is None:
+        return f"По фильтру {label} сейчас нет предложений."
+
+    lines = [
+        f"🔎 {label}",
+        f"Предложений: {summary.offer_count}",
+        f"Минимум: {format_money(summary.min_price)}",
+        f"Медиана: {format_money(summary.median_price)}",
+    ]
+    if offers:
+        lines.append("")
+        lines.append("Самые дешёвые:")
+        for index, offer in enumerate(offers, 1):
+            seller = offer.seller_name or "продавец без имени"
+            online = " · онлайн" if offer.is_online else ""
+            lines.append(f"{index}. {format_money(offer.price)} · {seller}{online}")
+    return "\n".join(lines)
 
 
 def format_stats_text(

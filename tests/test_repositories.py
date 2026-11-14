@@ -9,6 +9,7 @@ from app.db.repositories import (
     PARSE_RUN_RUNNING,
     SnapshotFilter,
     add_price_snapshots,
+    cheapest_offers,
     count_active_subscriptions,
     current_price_summary,
     deactivate_subscription,
@@ -566,6 +567,112 @@ async def test_filtered_offers_get_their_own_snapshots_and_summaries(
     assert aggregates[0].min_price == Decimal("30")
     assert aggregates[0].median_price == Decimal("40")
     assert aggregates[0].offer_count == 2
+
+
+async def test_cheapest_offers_filter_sort_and_limit(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    offers = [
+        parsed_offer(
+            server_id=1,
+            server_name="EU",
+            price=Decimal("30"),
+            item_type="предметы",
+            title="Plush Nessie",
+        ),
+        parsed_offer(
+            server_id=1,
+            server_name="EU",
+            price=Decimal("10"),
+            item_type="предметы",
+            title="Plush Nessie",
+        ),
+        parsed_offer(
+            server_id=1,
+            server_name="EU",
+            price=Decimal("20"),
+            item_type="предметы",
+            title="Plush Nessie",
+        ),
+        parsed_offer(
+            server_id=1,
+            server_name="EU",
+            price=Decimal("5"),
+            item_type="услуги",
+            title="Plush Nessie boost",
+        ),
+        parsed_offer(
+            server_id=2,
+            server_name="NA",
+            price=Decimal("1"),
+            item_type="предметы",
+            title="Plush Nessie",
+        ),
+        parsed_offer(
+            server_id=1,
+            server_name="EU",
+            price=Decimal("7"),
+            item_type="предметы",
+            title="Other item",
+        ),
+    ]
+
+    async with session_factory() as session:
+        category = await get_or_create_category(session, INFO)
+        servers = await upsert_servers(session, category.id, offers)
+        await replace_offers(session, category.id, offers, servers)
+        await session.commit()
+        category_id = category.id
+        eu_id = servers[1].id
+
+    async with session_factory() as session:
+        everything = await cheapest_offers(
+            session,
+            category_id,
+            item_type="предметы",
+            query="plush nessie",
+        )
+        top_two = await cheapest_offers(
+            session,
+            category_id,
+            item_type="предметы",
+            query="plush nessie",
+            limit=2,
+        )
+        europe = await cheapest_offers(
+            session,
+            category_id,
+            server_id=eu_id,
+            item_type="предметы",
+            query="plush nessie",
+        )
+        uppercase = await cheapest_offers(
+            session,
+            category_id,
+            item_type="предметы",
+            query="PLUSH NESSIE",
+        )
+        missing = await cheapest_offers(
+            session,
+            category_id,
+            item_type="предметы",
+            query="nonexistent",
+        )
+
+    assert [offer.price for offer in everything] == [
+        Decimal("1"),
+        Decimal("10"),
+        Decimal("20"),
+    ]
+    assert [offer.price for offer in top_two] == [Decimal("1"), Decimal("10")]
+    assert [offer.price for offer in europe] == [
+        Decimal("10"),
+        Decimal("20"),
+        Decimal("30"),
+    ]
+    assert [offer.price for offer in uppercase] == [Decimal("1"), Decimal("10"), Decimal("20")]
+    assert missing == []
+    assert all(offer.item_type == "предметы" for offer in everything)
 
 
 async def test_subscription_identity_includes_offer_filter(

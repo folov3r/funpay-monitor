@@ -523,6 +523,29 @@ async def current_price_summary(
     )
 
 
+async def cheapest_offers(
+    session: AsyncSession,
+    category_id: int,
+    *,
+    server_id: int | None = None,
+    item_type: str | None = None,
+    query: str | None = None,
+    limit: int = 3,
+) -> list[Offer]:
+    """Return the cheapest current offers matching the same slice as snapshots."""
+    statement = select(Offer).where(Offer.category_id == category_id)
+    if server_id is not None:
+        statement = statement.where(Offer.server_id == server_id)
+    if item_type is not None:
+        statement = statement.where(Offer.item_type == item_type)
+    if query is not None:
+        statement = statement.where(
+            func.lower(Offer.title).contains(query.casefold(), autoescape=True)
+        )
+    statement = statement.order_by(Offer.price.asc()).limit(limit)
+    return list(await session.scalars(statement))
+
+
 async def list_aggregated_snapshots(
     session: AsyncSession,
     category_id: int,

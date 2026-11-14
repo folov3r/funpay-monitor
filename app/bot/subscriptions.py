@@ -29,6 +29,7 @@ from app.bot.texts import (
     format_condition,
     format_item_type,
     format_offer_filter,
+    format_offer_summary,
     format_server_field,
     format_stats_text,
     format_subscription_list,
@@ -46,6 +47,7 @@ from app.bot.texts import (
     split_command,
 )
 from app.db.repositories import (
+    cheapest_offers,
     current_price_summary,
     deactivate_subscription,
     get_user_subscription,
@@ -377,12 +379,31 @@ def register_subscription_handlers(bot: Bot, services: BotServices) -> None:
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_QUERY)
     async def waiting_query_handler(message: Message, user_id: int) -> None:
-        payload = _payload(message)
-        await _ask_server(
-            bot,
-            message,
-            {**payload, "query": normalize_query(message.text)},
-        )
+        payload = {**_payload(message), "query": normalize_query(message.text)}
+        category_id = payload.get("category_id")
+        if category_id is not None:
+            async with services.session_factory() as session:
+                summary = await current_price_summary(
+                    session,
+                    int(category_id),
+                    item_type=payload.get("item_type"),
+                    query=payload.get("query"),
+                )
+                offers = await cheapest_offers(
+                    session,
+                    int(category_id),
+                    item_type=payload.get("item_type"),
+                    query=payload.get("query"),
+                )
+            await message.answer(
+                format_offer_summary(
+                    summary,
+                    offers,
+                    item_type=payload.get("item_type"),
+                    query=payload.get("query"),
+                )
+            )
+        await _ask_server(bot, message, payload)
 
     @bot.on.message(state=AddSubscriptionStates.WAITING_SERVER)
     async def waiting_server_handler(message: Message, user_id: int) -> None:

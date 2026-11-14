@@ -9,6 +9,7 @@ from app.bot.texts import (
     format_item_type,
     format_money,
     format_offer_filter,
+    format_offer_summary,
     format_stats_text,
     format_subscription_list,
     is_add_command,
@@ -267,6 +268,34 @@ def test_format_subscription_list_omits_server_for_lot_categories() -> None:
 
     assert "Сервер" not in text
     assert "любой" not in text
+
+
+def test_format_offer_summary() -> None:
+    summary = PriceSummary(Decimal("0.9889"), Decimal("2.382892"), 19)
+    offers = [
+        SimpleNamespace(price=Decimal("0.9889"), seller_name="alice", is_online=True),
+        SimpleNamespace(price=Decimal("1.072301"), seller_name=None, is_online=False),
+    ]
+
+    text = format_offer_summary(
+        summary,
+        offers,
+        item_type="предметы",
+        query="cosmic relic",
+    )
+
+    assert "Предметы · «cosmic relic»" in text
+    assert "Предложений: 19" in text
+    assert "Минимум: 0,9889 ₽" in text
+    assert "Медиана: 2,38 ₽" in text
+    assert "1. 0,9889 ₽ · alice · онлайн" in text
+    assert "2. 1,07 ₽ · продавец без имени" in text
+
+
+def test_format_offer_summary_without_matches() -> None:
+    text = format_offer_summary(None, [], item_type="предметы", query="nope")
+
+    assert "сейчас нет предложений" in text
 
 
 def test_format_stats_text_shows_filter() -> None:
