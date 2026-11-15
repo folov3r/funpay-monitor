@@ -16,11 +16,13 @@ pytest                                   # без БД, интеграционн
 ruff check .
 ruff format --check .
 
-TEST_DATABASE_URL="postgresql+asyncpg://funpay:funpay@localhost:5432/funpay" pytest
+TEST_DATABASE_URL="postgresql+asyncpg://funpay:funpay@localhost:5432/funpay_test" pytest
 ```
 
-Интеграционные тесты создают схему в указанной базе и удаляют её после прогона.
-Не направляйте `TEST_DATABASE_URL` на базу с нужными данными.
+Без БД проходят 175 тестов, с интеграционными — 204. Интеграционные тесты
+создают схему в указанной базе и удаляют её после прогона. Не направляйте
+`TEST_DATABASE_URL` на базу с нужными данными: используйте отдельную
+`funpay_test`.
 
 ## Что покрыто
 

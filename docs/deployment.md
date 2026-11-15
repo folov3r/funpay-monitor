@@ -26,7 +26,13 @@ podman compose logs -f bot worker
 
 `podman compose` — обёртка над внешним провайдером. Если установлен
 `docker-compose`, используется он; Podman сам направляет его на свой сокет.
-Предупреждение о запуске внешней команды — нормальное.
+Предупреждение о запуске внешней команды — нормальное. Сокет должен быть
+запущен: без него compose падает с `failed to connect to the docker API at
+unix:///run/user/1000/podman/podman.sock`.
+
+Проверено на rootless Podman 6.3.0-dev с провайдером Docker Compose 5.6.1:
+`db` healthy, миграции доходят до последней ревизии, `bot` работает через
+Long Poll, `worker` выполняет прогон.
 
 Остановка и удаление данных:
 
@@ -68,7 +74,7 @@ docker compose up --build -d
 
 ## Резервные копии
 
-MVP не содержит автоматического бэкапа. Для защиты истории цен:
+Автоматического бэкапа нет. Для сохранения истории цен:
 
 ```bash
 docker compose exec -T db pg_dump -U funpay funpay > backup.sql
@@ -82,7 +88,7 @@ docker compose exec -T db pg_dump -U funpay funpay > backup.sql
 - `/status` в боте — сводка и последние запуски;
 - таблица `parse_runs` — история ошибок с текстом.
 
-Внешний мониторинг (Uptime Kuma, healthchecks) в MVP не подключён.
+Внешний мониторинг (Uptime Kuma, healthchecks) не подключён.
 
 ## Переменные продакшена
 
@@ -90,4 +96,4 @@ docker compose exec -T db pg_dump -U funpay funpay > backup.sql
 - не коммитьте `.env`;
 - `LOG_LEVEL=INFO`, при отладке — `DEBUG`;
 - интервал парсинга не меньше 15 минут;
-- при нескольких воркерах потребуется блокировка задач, в MVP запускается один.
+- при нескольких воркерах потребуется блокировка задач, сейчас запускается один.
