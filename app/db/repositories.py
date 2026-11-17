@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from statistics import median
 
 from sqlalchemy import delete, func, select, update
@@ -30,6 +30,19 @@ PARSE_RUN_RUNNING = "running"
 PARSE_RUN_OK = "ok"
 PARSE_RUN_ERROR = "error"
 PARSE_RUN_PARTIAL = "partial"
+
+#: Money is stored with six decimal places on both backends.
+MONEY_QUANTUM = Decimal("0.000001")
+
+
+def _mean(values: list[Decimal]) -> Decimal:
+    """Average Decimal prices without leaving Python.
+
+    PostgreSQL can average ``numeric`` natively, but SQLite stores money as
+    integer micro-units, so an SQL ``avg`` would return a raw float. Doing the
+    aggregation here keeps the result identical on both backends.
+    """
+    return (sum(values, Decimal(0)) / len(values)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +238,10 @@ async def add_price_snapshots(
     funpay_by_orm_id = {server.id: funpay_id for funpay_id, server in servers.items()}
     created: set[tuple[int, str | None, str | None]] = set()
     snapshots: list[PriceSnapshot] = []
+    # One explicit timestamp for the whole run. PostgreSQL ``now()`` is
+    # transaction-scoped, but SQLite ``CURRENT_TIMESTAMP`` is not, so relying on
+    # the server default could split a single run into several history points.
+    captured_at = datetime.now(UTC)
 
     def grouped_prices(
         item_type: str | None,
@@ -254,6 +271,7 @@ async def add_price_snapshots(
             min_price=min(prices),
             median_price=median(prices),
             offer_count=len(prices),
+            captured_at=captured_at,
         )
         session.add(snapshot)
         snapshots.append(snapshot)
@@ -324,7 +342,7 @@ async def list_price_snapshots(
     if since is not None:
         statement = statement.where(PriceSnapshot.captured_at >= since)
 
-    statement = statement.order_by(PriceSnapshot.captured_at.desc())
+    statement = statement.order_by(PriceSnapshot.captured_at.desc(), PriceSnapshot.id.desc())
     if limit is not None:
         statement = statement.limit(limit)
 
@@ -558,14 +576,14 @@ async def list_aggregated_snapshots(
     """Aggregate per-server snapshots of one parse run into a category-wide series.
 
     All snapshots written in a single monitoring transaction share the same
-    ``captured_at`` because PostgreSQL ``now()`` is transaction-scoped.
+    ``captured_at`` because :func:`add_price_snapshots` sets it explicitly.
     """
     statement = (
         select(
             PriceSnapshot.captured_at,
-            func.min(PriceSnapshot.min_price),
-            func.avg(PriceSnapshot.median_price),
-            func.sum(PriceSnapshot.offer_count),
+            PriceSnapshot.min_price,
+            PriceSnapshot.median_price,
+            PriceSnapshot.offer_count,
         )
         .where(PriceSnapshot.category_id == category_id)
         .where(
@@ -574,24 +592,27 @@ async def list_aggregated_snapshots(
             else PriceSnapshot.item_type == item_type
         )
         .where(PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query)
-        .group_by(PriceSnapshot.captured_at)
         .order_by(PriceSnapshot.captured_at.desc())
     )
     if since is not None:
         statement = statement.where(PriceSnapshot.captured_at >= since)
-    if limit is not None:
-        statement = statement.limit(limit)
 
     rows = (await session.execute(statement)).all()
+    grouped: dict[datetime, list[tuple[Decimal, Decimal, int]]] = {}
+    for captured_at, min_price, median_price, offer_count in rows:
+        grouped.setdefault(captured_at, []).append((min_price, median_price, offer_count))
+
     aggregates = [
         SnapshotAggregate(
-            captured_at=row[0],
-            min_price=row[1],
-            median_price=row[2],
-            offer_count=int(row[3]),
+            captured_at=captured_at,
+            min_price=min(item[0] for item in items),
+            median_price=_mean([item[1] for item in items]),
+            offer_count=sum(item[2] for item in items),
         )
-        for row in rows
+        for captured_at, items in grouped.items()
     ]
+    if limit is not None:
+        aggregates = aggregates[:limit]
     aggregates.reverse()
     return aggregates
 
@@ -646,13 +667,13 @@ async def _category_snapshot_at(
     item_type: str | None = None,
     query: str | None = None,
 ) -> SnapshotPoint | None:
-    row = (
+    rows = (
         await session.execute(
             select(
-                func.max(PriceSnapshot.id),
-                func.min(PriceSnapshot.min_price),
-                func.avg(PriceSnapshot.median_price),
-                func.sum(PriceSnapshot.offer_count),
+                PriceSnapshot.id,
+                PriceSnapshot.min_price,
+                PriceSnapshot.median_price,
+                PriceSnapshot.offer_count,
             ).where(
                 PriceSnapshot.category_id == category_id,
                 PriceSnapshot.captured_at == captured_at,
@@ -662,15 +683,15 @@ async def _category_snapshot_at(
                 PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query,
             )
         )
-    ).one()
-    if row[0] is None:
+    ).all()
+    if not rows:
         return None
     return SnapshotPoint(
-        snapshot_id=int(row[0]),
+        snapshot_id=max(row[0] for row in rows),
         captured_at=captured_at,
-        min_price=row[1],
-        median_price=row[2],
-        offer_count=int(row[3]),
+        min_price=min(row[1] for row in rows),
+        median_price=_mean([row[2] for row in rows]),
+        offer_count=sum(row[3] for row in rows),
     )
 
 
@@ -801,7 +822,7 @@ async def historical_min_price(
     query: str | None = None,
 ) -> Decimal | None:
     """Return the lowest price seen before ``before``."""
-    statement = select(func.min(PriceSnapshot.min_price)).where(
+    statement = select(PriceSnapshot.min_price).where(
         PriceSnapshot.category_id == category_id,
         PriceSnapshot.captured_at < before,
     )
@@ -815,7 +836,8 @@ async def historical_min_price(
     statement = statement.where(
         PriceSnapshot.query.is_(None) if query is None else PriceSnapshot.query == query
     )
-    return await session.scalar(statement)
+    prices = list(await session.scalars(statement))
+    return min(prices) if prices else None
 
 
 async def latest_category_captured_at(
