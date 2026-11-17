@@ -63,7 +63,7 @@
 ### Готовые сборки
 
 Скачайте установщик со страницы
-[Releases](https://github.com/folov3r/group-project/releases):
+[Releases](https://github.com/folov3r/funpay-monitor/releases):
 
 - Windows — `.msi` или `.exe`;
 - Linux — `.deb` или `.AppImage`.
