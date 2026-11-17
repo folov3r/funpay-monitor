@@ -93,12 +93,25 @@ jobs:
         with:
           path: artifacts
 
+      # `download-artifact` keeps the bundle directory of each artifact, so the
+      # installers live at `artifacts/<artifact>/<bundle>/<file>`.
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "FunPay Monitor $GITHUB_REF_NAME" \
-            --generate-notes \
-            artifacts/*/*.msi artifacts/*/*.exe artifacts/*/*.deb artifacts/*/*.AppImage
+          mapfile -t files < <(find artifacts -type f \
+            \( -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' \) | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No installers found in artifacts" >&2
+            exit 1
+          fi
+          printf '%s\n' "${files[@]}"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "FunPay Monitor $GITHUB_REF_NAME" \
+              --generate-notes \
+              "${files[@]}"
+          fi
