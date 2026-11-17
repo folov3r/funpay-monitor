@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     local_user_vk_id: int = 0
     #: Days of price history returned by the API and used by alerts.
     history_days: int = Field(default=7, ge=1)
+    #: Override the per-user directory for the SQLite file (desktop build).
+    data_dir: str = ""
 
     parse_interval_minutes: int = Field(default=15, ge=1)
     request_delay_seconds: float = Field(default=3.0, ge=0)
