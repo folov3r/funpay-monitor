@@ -90,6 +90,9 @@ def main() -> None:
     ]
     for module in EXCLUDES:
         command += ["--exclude-module", module]
+    if sys.platform == "win32":
+        # Windows toast notifications are imported lazily inside the notifier.
+        command += ["--collect-all", "winotify"]
     command.append(str(ROOT / "scripts" / "core_entry.py"))
 
     subprocess.run(command, check=True, cwd=ROOT)

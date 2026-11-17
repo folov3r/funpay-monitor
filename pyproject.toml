@@ -38,6 +38,7 @@ dev = [
 ]
 build = [
     "pyinstaller>=6.5",
+    "winotify>=1.1; sys_platform == 'win32'",
 ]
 docs = [
     "mkdocs-material>=9.5",
