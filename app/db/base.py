@@ -1,5 +1,8 @@
 """Async engine and session factory shared by entry points and tests."""
 
+from __future__ import annotations
+
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -8,16 +11,45 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import get_settings
+from app.db.models import Base
 
 
 def build_engine(database_url: str | None = None) -> AsyncEngine:
-    """Create an async engine for the given database URL."""
-    return create_async_engine(
-        database_url or get_settings().database_url,
-        pool_pre_ping=True,
-    )
+    """Create an async engine for the given database URL.
+
+    SQLite gets WAL mode and a busy timeout so the API and the background
+    scheduler can share one file without ``database is locked`` errors.
+    """
+    url = database_url or get_settings().database_url
+    engine = create_async_engine(url, pool_pre_ping=True)
+
+    if engine.url.get_backend_name() == "sqlite":
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _configure_sqlite(dbapi_connection: object, _: object) -> None:
+            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA busy_timeout=5000")
+            finally:
+                cursor.close()
+
+    return engine
 
 
 def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Create a session factory bound to the engine."""
     return async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def ensure_schema(engine: AsyncEngine) -> None:
+    """Create the schema for SQLite.
+
+    PostgreSQL deployments keep using Alembic; the desktop build is a single
+    local file and creates its tables on first launch.
+    """
+    if engine.url.get_backend_name() != "sqlite":
+        return
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)

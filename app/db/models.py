@@ -8,11 +8,9 @@ from decimal import Decimal
 from sqlalchemy import (
     BigInteger,
     Boolean,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
-    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -22,6 +20,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from app.db.types import Amount, BigIntPK, Money, UTCDateTime
+
 
 class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
@@ -30,12 +30,12 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     vk_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     first_name: Mapped[str | None] = mapped_column(String(255))
     is_admin: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), nullable=False
     )
 
     subscriptions: Mapped[list[Subscription]] = relationship(
@@ -49,7 +49,7 @@ class Category(Base):
     __tablename__ = "categories"
     __table_args__ = (UniqueConstraint("funpay_id", "type", name="uq_categories_funpay_id_type"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     funpay_id: Mapped[int] = mapped_column(Integer, nullable=False)
     type: Mapped[str] = mapped_column(String(16), nullable=False)  # 'chip' | 'lot'
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -58,9 +58,9 @@ class Category(Base):
     # Human label of the page's filter select ("Сервер", "Способ передачи", …).
     server_label: Mapped[str | None] = mapped_column(String(64))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False)
-    last_parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_parsed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), nullable=False
     )
 
     servers: Mapped[list[Server]] = relationship(
@@ -76,7 +76,7 @@ class Server(Base):
         UniqueConstraint("category_id", "funpay_server_id", name="uq_servers_category_server"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     category_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False
     )
@@ -95,7 +95,7 @@ class Offer(Base):
         Index("ix_offers_category_type_price", "category_id", "item_type", "price"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     category_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False
     )
@@ -104,8 +104,8 @@ class Offer(Base):
     )
     seller_id: Mapped[int | None] = mapped_column(BigInteger)
     seller_name: Mapped[str | None] = mapped_column(String(255))
-    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
-    price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    amount: Mapped[Decimal | None] = mapped_column(Amount)
+    price: Mapped[Decimal] = mapped_column(Money, nullable=False)
     currency: Mapped[str] = mapped_column(String(8), server_default="RUB", nullable=False)
     item_type: Mapped[str | None] = mapped_column(String(64))
     method: Mapped[str | None] = mapped_column(String(64))
@@ -113,7 +113,7 @@ class Offer(Base):
     is_online: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     is_promo: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     parsed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), nullable=False
     )
 
 
@@ -132,20 +132,20 @@ class PriceSnapshot(Base):
         ),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     category_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False
     )
     server_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
     )
-    min_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
-    median_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    min_price: Mapped[Decimal] = mapped_column(Money, nullable=False)
+    median_price: Mapped[Decimal] = mapped_column(Money, nullable=False)
     offer_count: Mapped[int] = mapped_column(Integer, nullable=False)
     item_type: Mapped[str | None] = mapped_column(String(64))
     query: Mapped[str | None] = mapped_column(String(255))
     captured_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), nullable=False
     )
 
 
@@ -154,14 +154,14 @@ class ParseRun(Base):
 
     __tablename__ = "parse_runs"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     category_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False
     )
     started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), nullable=False
     )
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     status: Mapped[str] = mapped_column(String(16), nullable=False)  # 'ok' | 'error' | 'partial'
     offers_found: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
     error_text: Mapped[str | None] = mapped_column(Text)
@@ -173,7 +173,7 @@ class Subscription(Base):
     __tablename__ = "subscriptions"
     __table_args__ = (Index("ix_subscriptions_category_active", "category_id", "is_active"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
@@ -186,10 +186,10 @@ class Subscription(Base):
     item_type: Mapped[str | None] = mapped_column(String(64))
     query: Mapped[str | None] = mapped_column(String(255))
     mode: Mapped[str] = mapped_column(String(16), nullable=False)  # 'abs' | 'pct' | 'lowest'
-    threshold: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    threshold: Mapped[Decimal | None] = mapped_column(Money)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), nullable=False
     )
 
     user: Mapped[User] = relationship(back_populates="subscriptions")
@@ -206,7 +206,7 @@ class Notification(Base):
     __tablename__ = "notifications"
     __table_args__ = (Index("ix_notifications_subscription_sent", "subscription_id", "sent_at"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     subscription_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False
     )
@@ -214,9 +214,9 @@ class Notification(Base):
         BigInteger, ForeignKey("price_snapshots.id", ondelete="CASCADE"), nullable=False
     )
     sent_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), nullable=False
     )
-    price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    price: Mapped[Decimal] = mapped_column(Money, nullable=False)
     reason: Mapped[str] = mapped_column(String(16), nullable=False)  # 'abs' | 'pct' | 'lowest'
 
     subscription: Mapped[Subscription] = relationship(back_populates="notifications")

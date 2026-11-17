@@ -12,6 +12,7 @@ license = "MIT"
 dependencies = [
     "vkbottle>=4.5",
     "SQLAlchemy[asyncio]>=2.0.30",
+    "aiosqlite>=0.20",
     "asyncpg>=0.29",
     "alembic>=1.13",
     "APScheduler>=3.10",
