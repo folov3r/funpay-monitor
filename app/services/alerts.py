@@ -260,6 +260,10 @@ class AlertService:
         return sent
 
     async def _render_chart(self, alert: PendingAlert) -> bytes | None:
+        # The desktop notifier shows a system toast and ignores the image, so
+        # there is no reason to pull matplotlib into the desktop bundle.
+        if not getattr(self._notifier, "supports_charts", False):
+            return None
         since = datetime.now(UTC) - timedelta(days=self._history_days)
         try:
             async with self._session_factory() as session:

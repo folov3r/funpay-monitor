@@ -20,6 +20,11 @@ htmlcov/
 node_modules/
 .vite/
 
+# Tauri / Rust build output
+target/
+frontend/src-tauri/gen/
+frontend/src-tauri/binaries/
+
 # Environment & secrets
 .env
 .env.*

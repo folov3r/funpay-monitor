@@ -1,0 +1,19 @@
+[package]
+name = "funpay-monitor"
+version = "0.3.0"
+description = "FunPay price monitor desktop shell"
+authors = ["FunPay Monitor"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "funpay_monitor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

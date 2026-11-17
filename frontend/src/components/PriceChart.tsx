@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
-import * as echarts from "echarts";
+import { LineChart } from "echarts/charts";
+import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
+import { init, use } from "echarts/core";
+import { CanvasRenderer } from "echarts/renderers";
 import type { HistoryPoint } from "../types";
+
+use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 interface Props {
   points: HistoryPoint[];
@@ -14,7 +19,7 @@ export function PriceChart({ points, height = 320 }: Props) {
     if (!container.current) {
       return;
     }
-    const chart = echarts.init(container.current, "dark", { renderer: "canvas" });
+    const chart = init(container.current, undefined, { renderer: "canvas" });
     const minSeries = points.map((point) => [point.captured_at, Number(point.min_price)]);
     const medianSeries = points.map((point) => [point.captured_at, Number(point.median_price)]);
 

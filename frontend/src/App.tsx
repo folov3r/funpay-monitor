@@ -647,24 +647,29 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    const load = () =>
-      api
-        .health()
-        .then((value) => {
-          if (active) {
-            setHealth({ database: value.database, scheduler: value.scheduler, version: value.version });
-          }
-        })
-        .catch(() => {
-          if (active) {
-            setHealth(null);
-          }
-        });
-    void load();
-    const timer = window.setInterval(load, 30000);
+    let timer = 0;
+    // The desktop window starts before the Python core is listening, so retry
+    // quickly until the first successful response, then settle to a slow poll.
+    const tick = async () => {
+      try {
+        const value = await api.health();
+        if (!active) {
+          return;
+        }
+        setHealth({ database: value.database, scheduler: value.scheduler, version: value.version });
+        timer = window.setTimeout(tick, 30000);
+      } catch {
+        if (!active) {
+          return;
+        }
+        setHealth(null);
+        timer = window.setTimeout(tick, 1500);
+      }
+    };
+    void tick();
     return () => {
       active = false;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, []);
 
@@ -694,10 +699,21 @@ export default function App() {
         ))}
       </nav>
 
-      {tab === "categories" ? <CategoriesView /> : null}
-      {tab === "subscriptions" ? <SubscriptionsView /> : null}
-      {tab === "notifications" ? <NotificationsView /> : null}
-      {tab === "status" ? <StatusView /> : null}
+      {health === null ? (
+        <section className="panel boot">
+          <h2>Запускаем локальное ядро…</h2>
+          <p className="muted">
+            Приложение подключается к локальному API. Обычно это занимает несколько секунд.
+          </p>
+        </section>
+      ) : (
+        <>
+          {tab === "categories" ? <CategoriesView /> : null}
+          {tab === "subscriptions" ? <SubscriptionsView /> : null}
+          {tab === "notifications" ? <NotificationsView /> : null}
+          {tab === "status" ? <StatusView /> : null}
+        </>
+      )}
     </div>
   );
 }

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "funpay-monitor"
-version = "0.2.0"
-description = "VK bot that monitors FunPay prices and sends alerts"
+version = "0.3.0"
+description = "Desktop and web app that monitors FunPay prices"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -35,6 +35,9 @@ dev = [
     "pytest-cov>=5.0",
     "respx>=0.21",
     "ruff>=0.4",
+]
+build = [
+    "pyinstaller>=6.5",
 ]
 docs = [
     "mkdocs-material>=9.5",

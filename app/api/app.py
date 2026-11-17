@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -26,14 +26,22 @@ from app.services.monitoring import MonitoringService, ParseOutcome
 
 logger = logging.getLogger(__name__)
 
-FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+def _frontend_dir() -> Path:
+    """Locate the built web UI, both in a checkout and in the frozen sidecar."""
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        bundled = Path(bundle_root) / "frontend" / "dist"
+        if bundled.is_dir():
+            return bundled
+    return Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 def _package_version() -> str:
-    try:
-        return version("funpay-monitor")
-    except PackageNotFoundError:  # pragma: no cover - source checkout without install
-        return "0.0.0"
+    """Return the version declared by the package itself."""
+    from app import __version__
+
+    return __version__
 
 
 def create_app(
@@ -141,15 +149,17 @@ def create_app(
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|tauri://localhost",
+        allow_origin_regex=(
+            r"(https?://(localhost|127\.0\.0\.1)(:\d+)?|tauri://localhost|http://tauri\.localhost)"
+        ),
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     app.include_router(router)
 
-    if FRONTEND_DIST.is_dir():
-        app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
+    if _frontend_dir().is_dir():
+        app.mount("/", StaticFiles(directory=_frontend_dir(), html=True), name="frontend")
 
     return app
 

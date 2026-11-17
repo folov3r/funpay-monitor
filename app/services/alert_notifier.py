@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 class VkAlertNotifier:
     """Send alerts to users through a VK community token."""
 
+    supports_charts = True
+
     def __init__(self, api: Any) -> None:
         self._api = api
 

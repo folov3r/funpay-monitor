@@ -10,13 +10,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.dates as mdates  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-
 _RENDER_LOCK = threading.Lock()
 
 
@@ -43,6 +36,15 @@ def render_price_chart(
     """
     if not points:
         raise ValueError("cannot render an empty price history")
+
+    # Imported lazily: the desktop build ships without matplotlib and never
+    # renders charts, but it imports the alerts service that uses this module.
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+    import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
 
     ordered = sorted(points, key=lambda point: point.captured_at)
     moments = [_naive_utc(point.captured_at) for point in ordered]
