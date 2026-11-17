@@ -105,7 +105,8 @@ Tauri добавляет sidecar через `tauri.release.conf.json`
 на Linux. Результат — в `frontend/src-tauri/target/release/bundle/`.
 
 При публикации тега `v*` workflow `.github/workflows/release.yml` собирает
-установщики для обеих систем и прикладывает их к артефактам сборки.
+установщики для обеих систем: Windows — `.msi` и `.exe`, Linux — `.deb` и
+`.AppImage`. По тегу создаётся GitHub Release с этими файлами.
 
 ## Разработка
 
