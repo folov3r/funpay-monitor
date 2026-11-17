@@ -25,7 +25,7 @@ nav:
   - Команды VK-бота: bot.md
   - Алерты: alerts.md
   - Тестирование: testing.md
-  - Развёртывание: deployment.md
+  - Развёртывание VK-бота: deployment.md
   - Ограничения: limitations.md
   - Презентация: presentation.md
   - QA-чеклист: qa-checklist.md
