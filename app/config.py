@@ -24,6 +24,16 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://funpay:funpay@localhost:5432/funpay"
 
+    #: Local API used by the desktop window and the browser UI.
+    api_host: str = "127.0.0.1"
+    api_port: int = Field(default=8765, ge=1, le=65535)
+    #: Run the parse scheduler inside the API process (desktop build).
+    scheduler_enabled: bool = True
+    #: User id that owns subscriptions created from the desktop UI.
+    local_user_vk_id: int = 0
+    #: Days of price history returned by the API and used by alerts.
+    history_days: int = Field(default=7, ge=1)
+
     parse_interval_minutes: int = Field(default=15, ge=1)
     request_delay_seconds: float = Field(default=3.0, ge=0)
     alert_cooldown_hours: int = Field(default=6, ge=0)

@@ -157,6 +157,21 @@ async def list_active_categories(session: AsyncSession) -> list[Category]:
     return list(result)
 
 
+async def list_categories(session: AsyncSession) -> list[Category]:
+    """Return every tracked category with its servers for the UI."""
+    result = await session.scalars(
+        select(Category).options(selectinload(Category.servers)).order_by(Category.id)
+    )
+    return list(result)
+
+
+async def get_category(session: AsyncSession, category_id: int) -> Category | None:
+    """Return one category with its servers preloaded."""
+    return await session.scalar(
+        select(Category).where(Category.id == category_id).options(selectinload(Category.servers))
+    )
+
+
 async def upsert_servers(
     session: AsyncSession,
     category_id: int,
@@ -879,6 +894,24 @@ def add_notification(
     )
     session.add(notification)
     return notification
+
+
+async def list_notifications(
+    session: AsyncSession,
+    *,
+    limit: int = 50,
+) -> list[Notification]:
+    """Return recent notifications with their subscription and category loaded."""
+    result = await session.scalars(
+        select(Notification)
+        .options(
+            selectinload(Notification.subscription).selectinload(Subscription.category),
+            selectinload(Notification.subscription).selectinload(Subscription.server),
+        )
+        .order_by(Notification.sent_at.desc(), Notification.id.desc())
+        .limit(limit)
+    )
+    return list(result)
 
 
 async def get_admin_stats(session: AsyncSession) -> AdminStats:
