@@ -17,6 +17,8 @@ venv/
 .coverage
 .coverage.*
 htmlcov/
+node_modules/
+.vite/
 
 # Environment & secrets
 .env
