@@ -18,8 +18,20 @@ interface Props {
 
 interface Bucket {
   label: string;
-  min: number;
-  median: number;
+  min: number | null;
+  median: number | null;
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function dayKey(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function hourKey(date: Date): string {
+  return `${dayKey(date)}T${pad(date.getHours())}`;
 }
 
 function aggregate(points: HistoryPoint[], period: ChartPeriod): Bucket[] {
@@ -31,23 +43,42 @@ function aggregate(points: HistoryPoint[], period: ChartPeriod): Bucket[] {
     if (Number.isNaN(date.getTime())) {
       continue;
     }
-    const day = date.toISOString().slice(0, 10);
-    const hour = String(date.getHours()).padStart(2, "0");
-    const key = period === "24h" ? `${day}T${hour}` : day;
-    const label =
-      period === "24h"
-        ? `${hour}:00`
-        : `${String(date.getDate()).padStart(2, "0")}.${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const key = period === "24h" ? hourKey(date) : dayKey(date);
     buckets.set(key, {
-      label,
+      label: period === "24h" ? `${pad(date.getHours())}:00` : `${pad(date.getDate())}.${pad(date.getMonth() + 1)}`,
       min: Number(point.min_price),
       median: Number(point.median_price),
     });
   }
 
-  const rows = [...buckets.values()];
-  const limit = period === "24h" ? 24 : period === "7d" ? 7 : 30;
-  return rows.slice(-limit);
+  // Keep the axis fixed to the selected window, like the mockup, even when
+  // some days have no snapshots yet.
+  const now = new Date();
+  const result: Bucket[] = [];
+  if (period === "24h") {
+    for (let i = 23; i >= 0; i -= 1) {
+      const date = new Date(now);
+      date.setHours(now.getHours() - i, 0, 0, 0);
+      const key = hourKey(date);
+      result.push(buckets.get(key) ?? { label: `${pad(date.getHours())}:00`, min: null, median: null });
+    }
+    return result;
+  }
+
+  const days = period === "7d" ? 7 : 30;
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const date = new Date(now);
+    date.setDate(now.getDate() - i);
+    const key = dayKey(date);
+    result.push(
+      buckets.get(key) ?? {
+        label: `${pad(date.getDate())}.${pad(date.getMonth() + 1)}`,
+        min: null,
+        median: null,
+      },
+    );
+  }
+  return result;
 }
 
 export function PriceChart({ points, period = "7d", height = 260 }: Props) {
@@ -55,7 +86,7 @@ export function PriceChart({ points, period = "7d", height = 260 }: Props) {
   const buckets = useMemo(() => aggregate(points, period), [points, period]);
 
   useEffect(() => {
-    if (!container.current || buckets.length === 0) {
+    if (!container.current || buckets.every((bucket) => bucket.min === null && bucket.median === null)) {
       return;
     }
     const chart = init(container.current, undefined, { renderer: "canvas" });
@@ -63,7 +94,7 @@ export function PriceChart({ points, period = "7d", height = 260 }: Props) {
     chart.setOption({
       backgroundColor: "transparent",
       animationDuration: 300,
-      grid: { left: 62, right: 8, top: 10, bottom: 30 },
+      grid: { left: 44, right: 8, top: 0, bottom: 20 },
       tooltip: {
         trigger: "axis",
         backgroundColor: "#16233a",
@@ -85,7 +116,7 @@ export function PriceChart({ points, period = "7d", height = 260 }: Props) {
         axisLabel: {
           color: "#64748b",
           fontSize: 10,
-          formatter: (value: number) => money(value),
+          formatter: (value: number) => `${money(value)} ₽`,
         },
         splitLine: { lineStyle: { color: "rgba(36,52,79,0.65)" } },
         axisLine: { show: false },
@@ -96,15 +127,15 @@ export function PriceChart({ points, period = "7d", height = 260 }: Props) {
           name: "минимум",
           type: "bar",
           data: buckets.map((bucket) => bucket.min),
-          barWidth: 12,
-          barGap: "35%",
+          barMaxWidth: 18,
+          barGap: "30%",
           itemStyle: { color: "#34d399", borderRadius: [3, 3, 0, 0] },
         },
         {
           name: "медиана",
           type: "bar",
           data: buckets.map((bucket) => bucket.median),
-          barWidth: 12,
+          barMaxWidth: 18,
           itemStyle: { color: "#60a5fa", borderRadius: [3, 3, 0, 0] },
         },
       ],
@@ -118,7 +149,7 @@ export function PriceChart({ points, period = "7d", height = 260 }: Props) {
     };
   }, [buckets]);
 
-  if (buckets.length === 0) {
+  if (buckets.every((bucket) => bucket.min === null && bucket.median === null)) {
     return (
       <div className="chart-empty">
         История цен пока пуста.

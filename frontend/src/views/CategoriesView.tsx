@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { PriceChart, type ChartPeriod } from "../components/PriceChart";
-import { ago, lots, money, percentDelta } from "../format";
+import { ago, agoLong, lots, money, offersLabel, percentDelta } from "../format";
 import type { Category, HistoryPoint, Notification, Offer, PriceSummary } from "../types";
 
 const PERIODS: { id: ChartPeriod; label: string; days: number }[] = [
@@ -30,8 +30,6 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [serverId, setServerId] = useState("");
-  const [itemType, setItemType] = useState("");
-  const [itemTypes, setItemTypes] = useState<string[]>([]);
   const [summary, setSummary] = useState<PriceSummary | null>(null);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
@@ -86,7 +84,6 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
     let cancelled = false;
     const filters = {
       server_id: serverId === "" ? null : Number(serverId),
-      item_type: itemType || undefined,
     };
     Promise.all([
       api.summary(selectedId, filters),
@@ -101,11 +98,6 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
         setOffers(nextOffers);
         setHistory(nextHistory);
         setError(null);
-        if (itemType === "") {
-          setItemTypes(
-            Array.from(new Set(nextOffers.map((offer) => offer.item_type).filter(Boolean))) as string[],
-          );
-        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -115,7 +107,7 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
     return () => {
       cancelled = true;
     };
-  }, [selectedId, serverId, itemType, days, reloadKey]);
+  }, [selectedId, serverId, days, reloadKey]);
 
   const sellerCount = useMemo(
     () => new Set(offers.map((offer) => offer.seller_name).filter(Boolean)).size,
@@ -147,8 +139,6 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
     }
     setSelectedId(id);
     setServerId("");
-    setItemType("");
-    setItemTypes([]);
     setNotice(null);
     setError(null);
   }
@@ -201,17 +191,6 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
               {(selected?.servers ?? []).map((server) => (
                 <option key={server.id} value={server.id}>
                   {server.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Тип</span>
-            <select value={itemType} onChange={(event) => setItemType(event.target.value)}>
-              <option value="">Все</option>
-              {itemTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
                 </option>
               ))}
             </select>
@@ -278,7 +257,7 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
             </h1>
             <p>
               {selected
-                ? `обновлено ${ago(selected.last_parsed_at)} · ${summary?.offer_count ?? 0} предложений`
+                ? `обновлено ${agoLong(selected.last_parsed_at)} · ${offersLabel(summary?.offer_count ?? 0)}`
                 : "Добавьте категорию FunPay, чтобы начать мониторинг"}
             </p>
           </div>
@@ -316,7 +295,7 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
           </div>
         </div>
 
-        <section className="panel">
+        <section className="panel chart-panel">
           <div className="chart-head">
             <h2>Динамика цен</h2>
             <div className="legend">
@@ -355,13 +334,19 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
             </span>
           </div>
           <div className="table-wrap">
-            <table>
+            <table className="fixed">
+              <colgroup>
+                <col style={{ width: "43.4%" }} />
+                <col style={{ width: "18.9%" }} />
+                <col style={{ width: "22.6%" }} />
+                <col style={{ width: "15.1%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Продавец</th>
                   <th>Цена</th>
                   <th>Количество</th>
-                  <th>Статус</th>
+                  <th>Обновлено</th>
                 </tr>
               </thead>
               <tbody>
@@ -369,15 +354,10 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
                   <tr key={offer.id} className={index === 0 ? "cheapest" : undefined}>
                     <td>
                       <span className="seller">{offer.seller_name ?? "—"}</span>
-                      {offer.title ? <span className="seller-sub">{offer.title}</span> : null}
                     </td>
                     <td className="price">{money(offer.price)} ₽</td>
                     <td>{offer.amount ? money(offer.amount) : "—"}</td>
-                    <td>
-                      {offer.is_online ? <span className="badge online">онлайн</span> : null}
-                      {offer.is_promo ? <span className="badge promo">промо</span> : null}
-                      {!offer.is_online && !offer.is_promo ? <span className="dim">—</span> : null}
-                    </td>
+                    <td className="muted">{ago(offer.parsed_at)}</td>
                   </tr>
                 ))}
                 {offers.length === 0 ? (

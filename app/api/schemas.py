@@ -53,6 +53,7 @@ class OfferOut(BaseModel):
     title: str | None = None
     is_online: bool
     is_promo: bool
+    parsed_at: datetime
 
 
 class HistoryPointOut(BaseModel):

@@ -1,16 +1,22 @@
 import type { Offer } from "../types";
-import { money } from "../format";
+import { ago, money } from "../format";
 
 export function OffersTable({ offers, limit = 10 }: { offers: Offer[]; limit?: number }) {
   return (
     <div className="table-wrap">
-      <table>
+      <table className="fixed">
+        <colgroup>
+          <col style={{ width: "43.4%" }} />
+          <col style={{ width: "18.9%" }} />
+          <col style={{ width: "22.6%" }} />
+          <col style={{ width: "15.1%" }} />
+        </colgroup>
         <thead>
           <tr>
             <th>Продавец</th>
             <th>Цена</th>
             <th>Количество</th>
-            <th>Статус</th>
+            <th>Обновлено</th>
           </tr>
         </thead>
         <tbody>
@@ -18,15 +24,10 @@ export function OffersTable({ offers, limit = 10 }: { offers: Offer[]; limit?: n
             <tr key={offer.id} className={index === 0 ? "cheapest" : undefined}>
               <td>
                 <span className="seller">{offer.seller_name ?? "—"}</span>
-                {offer.title ? <span className="seller-sub">{offer.title}</span> : null}
               </td>
               <td className="price">{money(offer.price)} ₽</td>
               <td>{offer.amount ? money(offer.amount) : "—"}</td>
-              <td>
-                {offer.is_online ? <span className="badge online">онлайн</span> : null}
-                {offer.is_promo ? <span className="badge promo">промо</span> : null}
-                {!offer.is_online && !offer.is_promo ? <span className="dim">—</span> : null}
-              </td>
+              <td className="muted">{ago(offer.parsed_at)}</td>
             </tr>
           ))}
           {offers.length === 0 ? (

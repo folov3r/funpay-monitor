@@ -47,6 +47,54 @@ export function ago(value: string | null | undefined): string {
   return `${Math.floor(diff / DAY)} дн`;
 }
 
+function minutesWord(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return "минуту";
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return "минуты";
+  }
+  return "минут";
+}
+
+export function agoLong(value: string | null | undefined): string {
+  if (!value) {
+    return "никогда";
+  }
+  const date = asDate(value);
+  if (Number.isNaN(date.getTime())) {
+    return "никогда";
+  }
+  const diff = Date.now() - date.getTime();
+  if (diff < MINUTE) {
+    return "только что";
+  }
+  if (diff < HOUR) {
+    const count = Math.floor(diff / MINUTE);
+    return `${count} ${minutesWord(count)} назад`;
+  }
+  if (diff < DAY) {
+    const count = Math.floor(diff / HOUR);
+    return `${count} ${count === 1 ? "час" : count < 5 ? "часа" : "часов"} назад`;
+  }
+  const count = Math.floor(diff / DAY);
+  return `${count} ${count === 1 ? "день" : count < 5 ? "дня" : "дней"} назад`;
+}
+
+export function offersLabel(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return `${count} предложение`;
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `${count} предложения`;
+  }
+  return `${count} предложений`;
+}
+
 export function lots(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -64,6 +112,18 @@ export interface Delta {
   direction: "up" | "down" | "flat";
 }
 
+function daysLabel(days: number): string {
+  const mod10 = days % 10;
+  const mod100 = days % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return `${days} день`;
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `${days} дня`;
+  }
+  return `${days} дней`;
+}
+
 export function percentDelta(first: string, last: string, days: number): Delta {
   const start = Number(first);
   const end = Number(last);
@@ -72,11 +132,11 @@ export function percentDelta(first: string, last: string, days: number): Delta {
   }
   const change = ((end - start) / start) * 100;
   if (Math.abs(change) < 0.05) {
-    return { text: `0% за ${days} дн`, direction: "flat" };
+    return { text: `0% за ${daysLabel(days)}`, direction: "flat" };
   }
   const sign = change > 0 ? "+" : "−";
   return {
-    text: `${sign}${Math.abs(change).toFixed(1).replace(".", ",")}% за ${days} дн`,
+    text: `${sign}${Math.abs(change).toFixed(1).replace(".", ",")}% за ${daysLabel(days)}`,
     direction: change > 0 ? "up" : "down",
   };
 }

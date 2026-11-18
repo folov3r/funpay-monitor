@@ -43,6 +43,7 @@ export interface Offer {
   title: string | null;
   is_online: boolean;
   is_promo: boolean;
+  parsed_at: string;
 }
 
 export interface HistoryPoint {
