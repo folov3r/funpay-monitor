@@ -143,6 +143,9 @@ export function PriceChart({ points, period = "7d", height = 260 }: Props) {
 
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(container.current);
+    if (import.meta.env.DEV) {
+      (window as Window & { __priceChart?: unknown }).__priceChart = chart;
+    }
     return () => {
       observer.disconnect();
       chart.dispose();
