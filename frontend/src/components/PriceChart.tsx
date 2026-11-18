@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef } from "react";
-import { BarChart } from "echarts/charts";
+import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import { init, use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import type { HistoryPoint } from "../types";
 import { asDate, money } from "../format";
 
-use([BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
+use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
 export type ChartPeriod = "24h" | "7d" | "30d";
 
@@ -100,7 +100,7 @@ export function PriceChart({ points, period = "7d", height = 260 }: Props) {
         backgroundColor: "#16233a",
         borderColor: "#24344f",
         textStyle: { color: "#e2e8f0", fontSize: 12 },
-        axisPointer: { type: "shadow", shadowStyle: { color: "rgba(56,189,248,0.06)" } },
+        axisPointer: { type: "line", lineStyle: { color: "rgba(56,189,248,0.35)", width: 1 } },
         valueFormatter: (value: unknown) => `${money(Number(value))} ₽`,
       },
       xAxis: {
@@ -125,18 +125,25 @@ export function PriceChart({ points, period = "7d", height = 260 }: Props) {
       series: [
         {
           name: "минимум",
-          type: "bar",
+          type: "line",
           data: buckets.map((bucket) => bucket.min),
-          barMaxWidth: 18,
-          barGap: "30%",
-          itemStyle: { color: "#34d399", borderRadius: [3, 3, 0, 0] },
+          smooth: false,
+          symbol: "circle",
+          symbolSize: 6,
+          showSymbol: true,
+          lineStyle: { color: "#34d399", width: 2 },
+          itemStyle: { color: "#34d399", borderColor: "#0b1220", borderWidth: 1 },
         },
         {
           name: "медиана",
-          type: "bar",
+          type: "line",
           data: buckets.map((bucket) => bucket.median),
-          barMaxWidth: 18,
-          itemStyle: { color: "#60a5fa", borderRadius: [3, 3, 0, 0] },
+          smooth: false,
+          symbol: "circle",
+          symbolSize: 6,
+          showSymbol: true,
+          lineStyle: { color: "#60a5fa", width: 2 },
+          itemStyle: { color: "#60a5fa", borderColor: "#0b1220", borderWidth: 1 },
         },
       ],
     });
