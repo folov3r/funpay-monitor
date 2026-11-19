@@ -23,9 +23,7 @@ def upgrade() -> None:
     )
     # Rows removed before this migration were only deactivated; treat them as
     # deleted so they do not come back in the desktop list.
-    op.execute(
-        "UPDATE subscriptions SET deleted_at = created_at WHERE is_active = false"
-    )
+    op.execute("UPDATE subscriptions SET deleted_at = created_at WHERE is_active = false")
 
 
 def downgrade() -> None:

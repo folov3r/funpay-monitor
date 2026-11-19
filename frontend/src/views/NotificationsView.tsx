@@ -248,6 +248,7 @@ export function NotificationsView() {
           title={`${MODE_TITLE[openNote.mode]} · ${openNote.category_title}`}
           onClose={() => setOpenNote(null)}
           width={620}
+          className="note-modal"
         >
           <p className="panel-sub">
             {ago(openNote.sent_at)} назад · канал: система

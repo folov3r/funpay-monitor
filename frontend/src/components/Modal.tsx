@@ -57,7 +57,13 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   return (
-    <Modal caption="ПОДТВЕРЖДЕНИЕ" title={title} onClose={onCancel} width={440}>
+    <Modal
+      caption="ПОДТВЕРЖДЕНИЕ"
+      title={title}
+      onClose={onCancel}
+      width={440}
+      className="confirm-modal"
+    >
       <div className="confirm-lines">
         {lines.map((line) => (
           <p key={line}>{line}</p>

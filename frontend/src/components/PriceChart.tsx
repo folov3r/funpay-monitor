@@ -119,10 +119,10 @@ export function PriceChart({
       backgroundColor: "transparent",
       animationDuration: 300,
       grid: {
-        left: compact ? 12 : 44,
-        right: compact ? 8 : 10,
-        top: 8,
-        bottom: 22,
+        left: compact ? 18 : 44,
+        right: compact ? 0 : 10,
+        top: compact ? 0 : 8,
+        bottom: compact ? 0 : 22,
       },
       tooltip: {
         trigger: "axis",
@@ -138,6 +138,7 @@ export function PriceChart({
         data: buckets.map((bucket) => bucket.label),
         boundaryGap: false,
         axisLabel: {
+          show: !compact,
           color: LABEL,
           fontSize: 10,
           margin: 12,
@@ -150,11 +151,12 @@ export function PriceChart({
         type: "value",
         scale: true,
         axisLabel: {
+          show: !compact,
           color: LABEL,
           fontSize: 10,
           formatter: (value: number) => `${money(value)} ₽`,
         },
-        splitLine: { lineStyle: { color: GRID } },
+        splitLine: { show: !compact, lineStyle: { color: GRID } },
         axisLine: { show: false },
         axisTick: { show: false },
       },

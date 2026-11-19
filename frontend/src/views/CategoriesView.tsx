@@ -363,10 +363,10 @@ export function CategoriesView() {
           <div className="table-wrap">
             <table className="fixed">
               <colgroup>
-                <col style={{ width: "43.4%" }} />
-                <col style={{ width: "18.9%" }} />
-                <col style={{ width: "22.6%" }} />
-                <col style={{ width: "15.1%" }} />
+                <col style={{ width: "39.8%" }} />
+                <col style={{ width: "21.3%" }} />
+                <col style={{ width: "25.1%" }} />
+                <col style={{ width: "13.8%" }} />
               </colgroup>
               <thead>
                 <tr>

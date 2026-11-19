@@ -231,7 +231,7 @@ export function StatusView({ health }: { health: Health | null }) {
         }
       />
 
-      <div className="screen">
+      <div className="screen status-screen">
         {error ? <div className="banner error">{error}</div> : null}
 
         {status ? (

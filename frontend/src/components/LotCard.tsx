@@ -19,7 +19,13 @@ export function LotCardModal({
 }) {
   const seller = offer.seller_name ?? "Продавец";
   return (
-    <Modal caption="ЛОТ" title={`Лот · ${categoryTitle}`} onClose={onClose} width={560}>
+    <Modal
+      caption="ЛОТ"
+      title={`Лот · ${categoryTitle}`}
+      onClose={onClose}
+      width={560}
+      className="lot-modal"
+    >
       <div className="lot-seller">
         <span className="avatar lg">{initial(seller)}</span>
         <div className="lot-seller-copy">

@@ -545,7 +545,7 @@ export function SubscriptionsView() {
               </div>
             </div>
 
-            <div className="field">
+            <div className="field threshold-field">
               <span className="field-label">{modeMeta.label}</span>
               <div className="threshold-box">
                 <input
@@ -721,18 +721,20 @@ export function SubscriptionsView() {
                   </div>
 
                   <div className="mini-caption spaced">Цена и порог</div>
-                  <PriceChart
-                    points={stats?.history ?? []}
-                    period="7d"
-                    height={116}
-                    threshold={selectedThreshold}
-                    thresholdLabel={
-                      selectedThreshold !== null
-                        ? `порог ${money(selectedThreshold)} ₽`
-                        : undefined
-                    }
-                    compact
-                  />
+                  <div className="stats-chart">
+                    <PriceChart
+                      points={stats?.history ?? []}
+                      period="7d"
+                      height={116}
+                      threshold={selectedThreshold}
+                      thresholdLabel={
+                        selectedThreshold !== null
+                          ? `порог ${money(selectedThreshold)} ₽`
+                          : undefined
+                      }
+                      compact
+                    />
+                  </div>
 
                   <div className="mini-caption spaced">ПОСЛЕДНИЕ СРАБАТЫВАНИЯ</div>
                   <div className="event-list">
@@ -762,6 +764,7 @@ export function SubscriptionsView() {
           title="Статистика подписки"
           onClose={() => setStatsOpen(false)}
           width={760}
+          className="stats-modal"
         >
           <p className="panel-sub">
             {ruleLine(selectedSub)} · последние 30 дней · срабатываний:{" "}
@@ -794,15 +797,17 @@ export function SubscriptionsView() {
           </div>
 
           <div className="mini-caption spaced">Цена и порог</div>
-          <PriceChart
-            points={stats.history}
-            period="7d"
-            height={116}
-            threshold={selectedThreshold}
-            thresholdLabel={
-              selectedThreshold !== null ? `порог ${money(selectedThreshold)} ₽` : undefined
-            }
-          />
+          <div className="stats-chart">
+            <PriceChart
+              points={stats.history}
+              period="7d"
+              height={116}
+              threshold={selectedThreshold}
+              thresholdLabel={
+                selectedThreshold !== null ? `порог ${money(selectedThreshold)} ₽` : undefined
+              }
+            />
+          </div>
 
           <div className="mini-caption spaced">ИСТОРИЯ СРАБАТЫВАНИЙ</div>
           <div className="event-list">

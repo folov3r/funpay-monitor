@@ -8,9 +8,27 @@ import { StatusView } from "./views/StatusView";
 import { SubscriptionsView } from "./views/SubscriptionsView";
 import type { Health } from "./types";
 
+const TABS: Tab[] = ["categories", "subscriptions", "notifications", "status"];
+
+function tabFromHash(): Tab {
+  const value = window.location.hash.replace("#", "");
+  return TABS.includes(value as Tab) ? (value as Tab) : "categories";
+}
+
 export default function App() {
-  const [tab, setTab] = useState<Tab>("categories");
+  const [tab, setTab] = useState<Tab>(tabFromHash);
   const [health, setHealth] = useState<Health | null>(null);
+
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  function changeTab(next: Tab) {
+    setTab(next);
+    window.location.hash = next;
+  }
 
   useEffect(() => {
     let active = true;
@@ -43,7 +61,7 @@ export default function App() {
   return (
     <ToastProvider>
       <div className="app">
-        <Rail active={tab} onChange={setTab} health={health} />
+        <Rail active={tab} onChange={changeTab} health={health} />
 
         <main className="stage">
           <div className="stage-inner">
