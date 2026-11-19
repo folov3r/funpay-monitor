@@ -1,77 +1,79 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { LotCardModal } from "../components/LotCard";
+import { PageHeader } from "../components/PageHeader";
 import { PriceChart, type ChartPeriod } from "../components/PriceChart";
+import { StatTile } from "../components/StatTile";
+import { useToast } from "../components/Toast";
 import { ago, agoLong, lots, money, offersLabel, percentDelta } from "../format";
-import type { Category, HistoryPoint, Notification, Offer, PriceSummary } from "../types";
+import type { Category, HistoryPoint, Offer, PriceSummary } from "../types";
 
-const PERIODS: { id: ChartPeriod; label: string; days: number }[] = [
-  { id: "24h", label: "24ч", days: 1 },
-  { id: "7d", label: "7д", days: 7 },
-  { id: "30d", label: "30д", days: 30 },
+const PERIODS: { id: ChartPeriod; label: string; days: number; suffix: string }[] = [
+  { id: "24h", label: "24ч", days: 1, suffix: " · 24 часа" },
+  { id: "7d", label: "7д", days: 7, suffix: " · 7 дней" },
+  { id: "30d", label: "30д", days: 30, suffix: " · 30 дней" },
 ];
 
-function eventLabel(notification: Notification): string {
-  if (notification.mode === "lowest") {
-    return `Минимум: ${money(notification.price)} ₽`;
+function gamesWord(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return "игра";
   }
-  if (notification.mode === "pct") {
-    return `Скачок цены: ${money(notification.price)} ₽`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return "игры";
   }
-  return `Порог: ${money(notification.price)} ₽`;
+  return "игр";
 }
 
-const EVENT_COLORS: Record<Notification["mode"], string> = {
-  lowest: "var(--green)",
-  abs: "var(--blue)",
-  pct: "var(--red)",
-};
+function categoryName(category: Category | null): string {
+  if (!category) {
+    return "Категории";
+  }
+  return category.game_title ?? category.title;
+}
 
-export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: () => void }) {
+export function CategoriesView() {
+  const toast = useToast();
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [serverId, setServerId] = useState("");
+  const [summaries, setSummaries] = useState<Record<number, PriceSummary | null>>({});
   const [summary, setSummary] = useState<PriceSummary | null>(null);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
-  const [counts, setCounts] = useState<Record<number, number>>({});
-  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [period, setPeriod] = useState<ChartPeriod>("7d");
+  const [sort, setSort] = useState<"asc" | "desc">("asc");
+  const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [lotOffer, setLotOffer] = useState<Offer | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   const selected = categories.find((row) => row.id === selectedId) ?? null;
-  const days = PERIODS.find((row) => row.id === period)?.days ?? 7;
-
-  const loadCounts = useCallback(async (rows: Category[]) => {
-    const results = await Promise.allSettled(
-      rows.slice(0, 24).map(async (row) => ({ id: row.id, summary: await api.summary(row.id, {}) })),
-    );
-    const next: Record<number, number> = {};
-    for (const result of results) {
-      if (result.status === "fulfilled" && result.value.summary) {
-        next[result.value.id] = result.value.summary.offer_count;
-      }
-    }
-    setCounts(next);
-  }, []);
+  const periodMeta = PERIODS.find((row) => row.id === period) ?? PERIODS[1];
+  const days = periodMeta.days;
 
   const loadSidebar = useCallback(async () => {
     try {
-      const [nextCategories, nextNotifications] = await Promise.all([
-        api.categories(),
-        api.notifications(3),
-      ]);
-      setCategories(nextCategories);
-      setNotifications(nextNotifications);
-      setSelectedId((current) => current ?? nextCategories[0]?.id ?? null);
+      const rows = await api.categories();
+      setCategories(rows);
+      setSelectedId((current) => current ?? rows[0]?.id ?? null);
       setError(null);
-      void loadCounts(nextCategories);
+      const results = await Promise.allSettled(
+        rows.slice(0, 24).map(async (row) => ({ id: row.id, summary: await api.summary(row.id, {}) })),
+      );
+      const next: Record<number, PriceSummary | null> = {};
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          next[result.value.id] = result.value.summary;
+        }
+      }
+      setSummaries(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [loadCounts]);
+  }, []);
 
   useEffect(() => {
     void loadSidebar();
@@ -82,9 +84,7 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
       return;
     }
     let cancelled = false;
-    const filters = {
-      server_id: serverId === "" ? null : Number(serverId),
-    };
+    const filters = { server_id: serverId === "" ? null : Number(serverId) };
     Promise.all([
       api.summary(selectedId, filters),
       api.offers(selectedId, { ...filters, limit: 100 }),
@@ -114,6 +114,12 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
     [offers],
   );
 
+  const totalOffers = useMemo(
+    () =>
+      Object.values(summaries).reduce((sum, row) => sum + (row?.offer_count ?? 0), 0),
+    [summaries],
+  );
+
   const minDelta = useMemo(() => {
     if (history.length < 2) {
       return null;
@@ -128,10 +134,20 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
     return percentDelta(history[0].median_price, history[history.length - 1].median_price, days);
   }, [history, days]);
 
-  const totalOffers = useMemo(
-    () => Object.values(counts).reduce((sum, value) => sum + value, 0),
-    [counts],
-  );
+  const visibleOffers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const rows = query
+      ? offers.filter((offer) =>
+          `${offer.seller_name ?? ""} ${offer.title ?? ""}`.toLowerCase().includes(query),
+        )
+      : offers;
+    return [...rows].sort((a, b) =>
+      sort === "asc" ? Number(a.price) - Number(b.price) : Number(b.price) - Number(a.price),
+    );
+  }, [offers, search, sort]);
+
+  const shownOffers = visibleOffers.slice(0, 5);
+  const gameName = categoryName(selected);
 
   function selectCategory(id: number) {
     if (id === selectedId) {
@@ -139,7 +155,6 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
     }
     setSelectedId(id);
     setServerId("");
-    setNotice(null);
     setError(null);
   }
 
@@ -149,190 +164,202 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
     }
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
       const result = await api.reparse(selected.id);
-      setNotice(`Прогон: ${result.status}, ${result.offers_found} предложений`);
+      toast({
+        title: "Данные обновлены",
+        subtitle: `Прогон: ${result.status}, ${offersLabel(result.offers_found)}`,
+        tone: "accent",
+      });
       setReloadKey((value) => value + 1);
       void loadSidebar();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      toast({ title: "Не удалось обновить", subtitle: String(err), tone: "red" });
     } finally {
       setBusy(false);
     }
   }
 
-  const serverName = selected?.servers.find((server) => String(server.id) === serverId)?.name;
-
   return (
-    <div className="workspace">
-      <aside className="sidebar">
-        <section className="panel">
-          <div className="panel-title">
-            <h2>Фильтры</h2>
-          </div>
-          <label className="field">
-            <span>Игра</span>
-            <select
-              value={selectedId ?? ""}
-              onChange={(event) => selectCategory(Number(event.target.value))}
-            >
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.game_title ?? category.title}
-                </option>
-              ))}
-            </select>
+    <>
+      <PageHeader
+        title="Категории"
+        subtitle={`${categories.length} ${gamesWord(categories.length)} · ${offersLabel(totalOffers)} · обновлено ${agoLong(selected?.last_parsed_at)}`}
+        tools={
+          <label className="search-field">
+            <span className="search-glyph" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Найти игру или лот"
+              aria-label="Найти игру или лот"
+            />
           </label>
-          <label className="field">
-            <span>{selected?.server_label ?? "Сервер"}</span>
-            <select value={serverId} onChange={(event) => setServerId(event.target.value)}>
-              <option value="">Любой</option>
-              {(selected?.servers ?? []).map((server) => (
-                <option key={server.id} value={server.id}>
-                  {server.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="filters-actions">
-            <button className="button" onClick={() => setReloadKey((value) => value + 1)}>
-              Применить
-            </button>
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-title">
-            <h2>Категории</h2>
-            <span>{lots(totalOffers)}</span>
-          </div>
-          <div className="rows">
-            {categories.map((category) => (
-              <button
-                key={category.id}
-                className={category.id === selectedId ? "row active" : "row"}
-                onClick={() => selectCategory(category.id)}
-              >
-                <span>{category.title}</span>
-                <span className="count">{counts[category.id] ?? "—"}</span>
-              </button>
-            ))}
-            {categories.length === 0 ? <p className="muted">Пока ничего не отслеживается.</p> : null}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-title">
-            <h2>Последние события</h2>
-          </div>
-          <div className="events">
-            {notifications.map((notification) => (
-              <div className="event" key={notification.id}>
-                <span
-                  className="dot"
-                  style={{ background: EVENT_COLORS[notification.mode] }}
-                />
-                <span className="label">{eventLabel(notification)}</span>
-                <time>{ago(notification.sent_at)}</time>
-              </div>
-            ))}
-            {notifications.length === 0 ? (
-              <p className="muted">Событий пока нет.</p>
-            ) : null}
-          </div>
-          <button className="link-button" onClick={onOpenNotifications}>
-            Все уведомления →
-          </button>
-        </section>
-      </aside>
-
-      <main className="main">
-        <div className="page-head">
-          <div>
-            <h1>
-              {selected
-                ? `${selected.game_title ?? selected.title}${serverName ? ` · ${serverName}` : ""}`
-                : "Категории"}
-            </h1>
-            <p>
-              {selected
-                ? `обновлено ${agoLong(selected.last_parsed_at)} · ${offersLabel(summary?.offer_count ?? 0)}`
-                : "Добавьте категорию FunPay, чтобы начать мониторинг"}
-            </p>
-          </div>
-          <button className="button ghost small" onClick={() => void reparse()} disabled={busy || !selected}>
+        }
+        action={
+          <button
+            type="button"
+            className="btn primary header-action"
+            onClick={() => void reparse()}
+            disabled={busy || !selected}
+          >
             {busy ? "Парсим…" : "Обновить"}
           </button>
+        }
+      />
+
+      <div className="screen">
+        {error ? <div className="banner error">{error}</div> : null}
+
+        <div className="kpi-row">
+          <StatTile
+            label="ИГРЫ"
+            value={categories.length}
+            hint={`${categories.filter((row) => row.is_active).length} активных`}
+            hintTone="muted"
+            dotTone="accent"
+          />
+          <StatTile
+            label="ПРЕДЛОЖЕНИЯ"
+            value={money(totalOffers)}
+            hint={`${sellerCount} продавцов в выборке`}
+            hintTone="mint"
+            dotTone="mint"
+          />
+          <StatTile
+            label="МИНИМАЛЬНАЯ ЦЕНА"
+            value={summary ? `${money(summary.min_price)} ₽` : "—"}
+            hint={minDelta ? minDelta.text : "нет истории"}
+            hintTone="muted"
+            dotTone="mint"
+          />
+          <StatTile
+            label="МЕДИАНА"
+            value={summary ? `${money(summary.median_price)} ₽` : "—"}
+            hint={medianDelta ? medianDelta.text : "нет истории"}
+            hintTone="amber"
+            dotTone="amber"
+          />
         </div>
 
-        {error ? <p className="error">{error}</p> : null}
-        {notice ? <p className="notice">{notice}</p> : null}
-
-        <div className="metrics">
-          <div className="metric">
-            <span className="metric-label">Минимум</span>
-            <span className="metric-value">
-              {summary ? `${money(summary.min_price)} ₽` : "—"}
-            </span>
-            <span className={minDelta ? `metric-note ${minDelta.direction}` : "metric-note"}>
-              {minDelta ? minDelta.text : "нет истории"}
-            </span>
-          </div>
-          <div className="metric">
-            <span className="metric-label">Медиана</span>
-            <span className="metric-value">
-              {summary ? `${money(summary.median_price)} ₽` : "—"}
-            </span>
-            <span className={medianDelta ? `metric-note ${medianDelta.direction}` : "metric-note"}>
-              {medianDelta ? medianDelta.text : "нет истории"}
-            </span>
-          </div>
-          <div className="metric">
-            <span className="metric-label">Предложений</span>
-            <span className="metric-value">{summary?.offer_count ?? 0}</span>
-            <span className="metric-note">{sellerCount} продавцов</span>
-          </div>
-        </div>
-
-        <section className="panel chart-panel">
-          <div className="chart-head">
-            <h2>Динамика цен</h2>
-            <div className="legend">
-              <span>
-                <i style={{ background: "var(--green)" }} />
-                минимум
-              </span>
-              <span>
-                <i style={{ background: "var(--blue)" }} />
-                медиана
-              </span>
+        <div className="grid-320-648">
+          <section className="panel games-panel">
+            <div className="panel-head">
+              <h2>Игры</h2>
+              <span className="count-badge">{categories.length}</span>
             </div>
-            <div className="spacer" />
-            <div className="chips">
-              {PERIODS.map((row) => (
+
+            <div className="game-list">
+              {categories.map((category) => {
+                const on = category.id === selectedId;
+                const rowSummary = summaries[category.id];
+                const delta = on ? medianDelta : null;
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    className={on ? "game-row active" : "game-row"}
+                    onClick={() => selectCategory(category.id)}
+                  >
+                    <span className="game-name">{categoryName(category)}</span>
+                    <span className="game-meta">
+                      {lots(rowSummary?.offer_count ?? 0)} ·{" "}
+                      {category.is_active ? "активна" : "выключена"}
+                    </span>
+                    <span className="game-price">
+                      {rowSummary ? `${money(rowSummary.median_price)} ₽` : "—"}
+                    </span>
+                    {delta && delta.direction !== "flat" ? (
+                      <span className="delta-chip">{delta.text.split(" за ")[0]}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+              {categories.length === 0 ? (
+                <p className="empty-note">Пока ничего не отслеживается.</p>
+              ) : null}
+            </div>
+
+            <div className="soft-divider" />
+            <div className="mini-caption">СЕРВЕР</div>
+            <div className="chip-row">
+              <button
+                type="button"
+                className={serverId === "" ? "chip active" : "chip"}
+                onClick={() => setServerId("")}
+              >
+                Все
+              </button>
+              {(selected?.servers ?? []).map((server) => (
                 <button
-                  key={row.id}
-                  className={row.id === period ? "chip active" : "chip"}
-                  onClick={() => setPeriod(row.id)}
+                  key={server.id}
+                  type="button"
+                  className={String(server.id) === serverId ? "chip active" : "chip"}
+                  onClick={() => setServerId(String(server.id))}
                 >
-                  {row.label}
+                  {server.name}
                 </button>
               ))}
             </div>
-          </div>
-          <div className="chart-body">
-            <PriceChart points={history} period={period} />
-          </div>
-        </section>
+          </section>
 
-        <section className="panel">
-          <div className="table-head">
-            <h2>Лоты</h2>
-            <span>
-              {Math.min(offers.length, 5)} из {offers.length}
-            </span>
+          <section className="panel chart-panel">
+            <div className="panel-head chart-head">
+              <div>
+                <h2>Динамика цен</h2>
+                <p className="panel-sub">
+                  {gameName} · минимум и медиана{periodMeta.suffix}
+                </p>
+              </div>
+              <div className="segmented">
+                {PERIODS.map((row) => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className={row.id === period ? "active" : ""}
+                    onClick={() => setPeriod(row.id)}
+                  >
+                    {row.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="legend">
+              <span>
+                <i style={{ background: "var(--teal)" }} />
+                минимум
+              </span>
+              <span>
+                <i style={{ background: "var(--accent)" }} />
+                медиана
+              </span>
+            </div>
+
+            <PriceChart points={history} period={period} height={206} />
+          </section>
+        </div>
+
+        <section className="panel lots-panel">
+          <div className="panel-head">
+            <div className="inline-title">
+              <h2>Лоты</h2>
+              <span className="panel-sub">
+                {shownOffers.length} из {visibleOffers.length} · обновлено{" "}
+                {agoLong(selected?.last_parsed_at)}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="chip sort-chip"
+              onClick={() => setSort((value) => (value === "asc" ? "desc" : "asc"))}
+            >
+              {sort === "asc" ? "Сначала дешёвые" : "Сначала дорогие"}
+              <span className="caret">▾</span>
+            </button>
           </div>
+
           <div className="table-wrap">
             <table className="fixed">
               <colgroup>
@@ -350,17 +377,30 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
                 </tr>
               </thead>
               <tbody>
-                {offers.slice(0, 5).map((offer, index) => (
-                  <tr key={offer.id} className={index === 0 ? "cheapest" : undefined}>
-                    <td>
-                      <span className="seller">{offer.seller_name ?? "—"}</span>
-                    </td>
-                    <td className="price">{money(offer.price)} ₽</td>
-                    <td>{offer.amount ? money(offer.amount) : "—"}</td>
-                    <td className="muted">{ago(offer.parsed_at)}</td>
-                  </tr>
-                ))}
-                {offers.length === 0 ? (
+                {shownOffers.map((offer) => {
+                  const seller = offer.seller_name ?? "—";
+                  return (
+                    <tr
+                      key={offer.id}
+                      className="clickable"
+                      onClick={() => setLotOffer(offer)}
+                    >
+                      <td>
+                        <span className="seller-cell">
+                          <span className="avatar">
+                            {seller.trim().charAt(0).toUpperCase() || "?"}
+                            {offer.is_online ? <i className="avatar-dot" /> : null}
+                          </span>
+                          <span className="seller">{seller}</span>
+                        </span>
+                      </td>
+                      <td className="price">{money(offer.price)} ₽</td>
+                      <td>{offer.amount ? `${money(offer.amount)} шт` : "—"}</td>
+                      <td className="muted">{ago(offer.parsed_at)}</td>
+                    </tr>
+                  );
+                })}
+                {shownOffers.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="muted">
                       Предложений нет.
@@ -371,7 +411,23 @@ export function CategoriesView({ onOpenNotifications }: { onOpenNotifications: (
             </table>
           </div>
         </section>
-      </main>
-    </div>
+      </div>
+
+      {lotOffer ? (
+        <LotCardModal
+          offer={lotOffer}
+          categoryTitle={gameName}
+          onClose={() => setLotOffer(null)}
+          onOpen={() => {
+            setLotOffer(null);
+            toast({
+              title: "Открываем FunPay",
+              subtitle: "В приложении откроется браузер",
+              tone: "accent",
+            });
+          }}
+        />
+      ) : null}
+    </>
   );
 }

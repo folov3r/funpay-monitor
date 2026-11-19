@@ -467,19 +467,25 @@ async def upsert_subscription(
 async def list_user_subscriptions(
     session: AsyncSession,
     user_id: int,
+    *,
+    include_inactive: bool = False,
 ) -> list[Subscription]:
-    """Return active subscriptions of a user with category and server eager-loaded."""
+    """Return a user's subscriptions with category and server eager-loaded.
+
+    Deleted rules are always hidden. The desktop UI asks for inactive ones too
+    so a paused rule stays visible and can be resumed.
+    """
+    statement = select(Subscription).where(
+        Subscription.user_id == user_id,
+        Subscription.deleted_at.is_(None),
+    )
+    if not include_inactive:
+        statement = statement.where(Subscription.is_active.is_(True))
     result = await session.scalars(
-        select(Subscription)
-        .where(
-            Subscription.user_id == user_id,
-            Subscription.is_active.is_(True),
-        )
-        .options(
+        statement.options(
             selectinload(Subscription.category),
             selectinload(Subscription.server),
-        )
-        .order_by(Subscription.id)
+        ).order_by(Subscription.id)
     )
     return list(result)
 
@@ -489,19 +495,32 @@ async def get_user_subscription(
     subscription_id: int,
     user_id: int,
 ) -> Subscription | None:
-    """Return one user's subscription with category/server preloaded."""
+    """Return one live user subscription with category/server preloaded."""
     return await session.scalar(
         select(Subscription)
         .where(
             Subscription.id == subscription_id,
             Subscription.user_id == user_id,
-            Subscription.is_active.is_(True),
+            Subscription.deleted_at.is_(None),
         )
         .options(
             selectinload(Subscription.category),
             selectinload(Subscription.server),
         )
     )
+
+
+async def set_subscription_active(
+    session: AsyncSession,
+    subscription_id: int,
+    user_id: int,
+    is_active: bool,
+) -> Subscription | None:
+    """Pause or resume a user's rule; returns it or None if not found."""
+    subscription = await get_user_subscription(session, subscription_id, user_id)
+    if subscription is not None:
+        subscription.is_active = is_active
+    return subscription
 
 
 async def deactivate_subscription(
@@ -513,6 +532,7 @@ async def deactivate_subscription(
     subscription = await get_user_subscription(session, subscription_id, user_id)
     if subscription is not None:
         subscription.is_active = False
+        subscription.deleted_at = datetime.now(UTC)
     return subscription
 
 

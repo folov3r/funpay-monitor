@@ -238,6 +238,55 @@ async def test_subscription_lifecycle(client: httpx.AsyncClient) -> None:
     assert (await client.get("/api/subscriptions")).json() == []
 
 
+async def test_subscription_can_be_paused_and_resumed(client: httpx.AsyncClient) -> None:
+    imported = await client.post(
+        "/api/categories/import",
+        json={"url": "https://funpay.com/chips/30/"},
+    )
+    category_id = imported.json()["category"]["id"]
+    created = await client.post(
+        "/api/subscriptions",
+        json={"category_id": category_id, "mode": "abs", "threshold": "1.00"},
+    )
+    subscription_id = created.json()["id"]
+
+    paused = await client.patch(
+        f"/api/subscriptions/{subscription_id}",
+        json={"is_active": False},
+    )
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["is_active"] is False
+
+    listing = await client.get("/api/subscriptions")
+    assert [(row["id"], row["is_active"]) for row in listing.json()] == [(subscription_id, False)]
+
+    resumed = await client.patch(
+        f"/api/subscriptions/{subscription_id}",
+        json={"is_active": True},
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["is_active"] is True
+    assert (await client.get("/api/subscriptions")).json()[0]["is_active"] is True
+
+    # A paused rule still answers stats; a deleted one is gone for good.
+    await client.patch(f"/api/subscriptions/{subscription_id}", json={"is_active": False})
+    assert (await client.get(f"/api/subscriptions/{subscription_id}/stats")).status_code == 200
+    await client.delete(f"/api/subscriptions/{subscription_id}")
+    assert (
+        await client.patch(
+            f"/api/subscriptions/{subscription_id}",
+            json={"is_active": True},
+        )
+    ).status_code == 404
+
+
+async def test_scheduler_actions_are_rejected_when_disabled(client: httpx.AsyncClient) -> None:
+    response = await client.post("/api/scheduler/pause")
+
+    assert response.status_code == 409
+    assert (await client.post("/api/scheduler/unknown")).status_code == 404
+
+
 async def test_subscription_validation(client: httpx.AsyncClient) -> None:
     imported = await client.post(
         "/api/categories/import",

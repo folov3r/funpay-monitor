@@ -191,6 +191,8 @@ class Subscription(Base):
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime, server_default=func.now(), nullable=False
     )
+    #: Set when the user removes a rule; paused rules keep it empty.
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     user: Mapped[User] = relationship(back_populates="subscriptions")
     category: Mapped[Category] = relationship()

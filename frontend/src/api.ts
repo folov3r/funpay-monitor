@@ -80,9 +80,16 @@ export const api = {
     }),
   deleteSubscription: (id: number) =>
     request<void>(`/subscriptions/${id}`, { method: "DELETE" }),
+  setSubscriptionActive: (id: number, isActive: boolean) =>
+    request<Subscription>(`/subscriptions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active: isActive }),
+    }),
   subscriptionStats: (id: number, days = 7) =>
     request<SubscriptionStats>(`/subscriptions/${id}/stats${query({ days })}`),
   notifications: (limit = 50) => request<Notification[]>(`/notifications${query({ limit })}`),
   reparse: (categoryId: number) =>
     request<ReparseResult>(`/categories/${categoryId}/reparse`, { method: "POST" }),
+  scheduler: (action: "pause" | "resume" | "run") =>
+    request<{ state: string }>(`/scheduler/${action}`, { method: "POST" }),
 };

@@ -93,11 +93,15 @@ def create_app(
 
         async def parse_job() -> None:
             logger.info("Scheduled parse run started")
+            runtime["running"] = True
             try:
                 outcomes = await monitoring.run_all_active(on_outcome)
             except Exception:
                 logger.exception("Parse run failed before finishing")
                 return
+            finally:
+                runtime["running"] = False
+                runtime["last_run_at"] = datetime.now(UTC)
             ok_count = sum(1 for outcome in outcomes if outcome.status == PARSE_RUN_OK)
             logger.info(
                 "Parse run finished: %s categories, %s ok, %s failed",
@@ -105,6 +109,8 @@ def create_app(
                 ok_count,
                 len(outcomes) - ok_count,
             )
+
+        runtime: dict[str, object] = {"running": False, "last_run_at": None}
 
         scheduler: AsyncIOScheduler | None = None
         if scheduler_enabled:
@@ -128,6 +134,8 @@ def create_app(
         app.state.alerts = alerts
         app.state.parser = funpay_parser
         app.state.scheduler = scheduler
+        app.state.runtime = runtime
+        app.state.parse_job = parse_job
         app.state.settings = settings
         app.state.version = _package_version()
         app.state.database_backend = engine.url.get_backend_name()

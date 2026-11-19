@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from apscheduler.schedulers.base import STATE_PAUSED
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +31,7 @@ from app.api.schemas import (
     SubscriptionIn,
     SubscriptionOut,
     SubscriptionStatsOut,
+    SubscriptionUpdate,
 )
 from app.db.repositories import (
     PARSE_RUN_OK,
@@ -45,6 +48,7 @@ from app.db.repositories import (
     list_price_snapshots,
     list_recent_parse_runs,
     list_user_subscriptions,
+    set_subscription_active,
     upsert_subscription,
 )
 from app.parsers.funpay import normalize_category_path
@@ -106,9 +110,28 @@ async def health(request: Request) -> HealthOut:
 
 
 @router.get("/status", response_model=StatusOut)
-async def status(session: AsyncSession = Depends(get_session)) -> StatusOut:
+async def status(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> StatusOut:
     stats = await get_admin_stats(session)
     runs = await list_recent_parse_runs(session, limit=10)
+    scheduler = getattr(request.app.state, "scheduler", None)
+    runtime = getattr(request.app.state, "runtime", None) or {}
+    settings = request.app.state.settings
+    if scheduler is None:
+        scheduler_state = "off"
+    elif runtime.get("running"):
+        scheduler_state = "running"
+    elif scheduler.state == STATE_PAUSED:
+        scheduler_state = "paused"
+    else:
+        scheduler_state = "active"
+    next_run_at = None
+    if scheduler is not None:
+        job = scheduler.get_job("parse-all-categories")
+        if job is not None:
+            next_run_at = job.next_run_time
     return StatusOut(
         categories=stats.categories,
         active_categories=stats.active_categories,
@@ -128,7 +151,35 @@ async def status(session: AsyncSession = Depends(get_session)) -> StatusOut:
             )
             for run in runs
         ],
+        scheduler_state=scheduler_state,
+        next_run_at=next_run_at,
+        last_run_at=runtime.get("last_run_at"),
+        interval_minutes=settings.parse_interval_minutes,
     )
+
+
+@router.post("/scheduler/{action}")
+async def scheduler_action(action: str, request: Request) -> dict[str, str]:
+    """Pause, resume or trigger the background parse job from the status screen."""
+    if action not in {"pause", "resume", "run"}:
+        raise HTTPException(status_code=404, detail="unknown scheduler action")
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=409, detail="scheduler is disabled")
+    runtime = getattr(request.app.state, "runtime", None)
+    if action == "pause":
+        scheduler.pause()
+        return {"state": "paused"}
+    if action == "resume":
+        scheduler.resume()
+        return {"state": "active"}
+    if runtime is not None and runtime.get("running"):
+        raise HTTPException(status_code=409, detail="parse run already in progress")
+    job = getattr(request.app.state, "parse_job", None)
+    if job is None:
+        raise HTTPException(status_code=409, detail="parse job is not available")
+    asyncio.create_task(job())
+    return {"state": "running"}
 
 
 @router.get("/categories", response_model=list[CategoryOut])
@@ -269,7 +320,7 @@ async def subscriptions(
 ) -> list[SubscriptionOut]:
     user = await get_or_create_user(session, local_user_vk_id, "Локальный пользователь")
     await session.commit()
-    rows = await list_user_subscriptions(session, user.id)
+    rows = await list_user_subscriptions(session, user.id, include_inactive=True)
     return [_subscription_out(row) for row in rows]
 
 
@@ -304,6 +355,27 @@ async def create_subscription(
     if loaded is None:
         raise HTTPException(status_code=500, detail="subscription disappeared after save")
     return _subscription_out(loaded)
+
+
+@router.patch("/subscriptions/{subscription_id}", response_model=SubscriptionOut)
+async def update_subscription(
+    subscription_id: int,
+    payload: SubscriptionUpdate,
+    session: AsyncSession = Depends(get_session),
+    local_user_vk_id: int = Depends(get_local_user_vk_id),
+) -> SubscriptionOut:
+    """Pause or resume a rule without removing it from the list."""
+    user = await get_or_create_user(session, local_user_vk_id, "Локальный пользователь")
+    subscription = await set_subscription_active(
+        session,
+        subscription_id,
+        user.id,
+        payload.is_active,
+    )
+    if subscription is None:
+        raise HTTPException(status_code=404, detail="subscription not found")
+    await session.commit()
+    return _subscription_out(subscription)
 
 
 @router.delete("/subscriptions/{subscription_id}", status_code=204)

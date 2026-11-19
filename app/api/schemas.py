@@ -84,6 +84,10 @@ class SubscriptionIn(BaseModel):
     query: str | None = Field(default=None, max_length=255)
 
 
+class SubscriptionUpdate(BaseModel):
+    is_active: bool
+
+
 class SubscriptionOut(BaseModel):
     id: int
     category_id: int
@@ -124,6 +128,10 @@ class StatusOut(BaseModel):
     active_subscriptions: int
     offers: int
     parse_runs: list[ParseRunOut] = Field(default_factory=list)
+    scheduler_state: str = "off"
+    next_run_at: datetime | None = None
+    last_run_at: datetime | None = None
+    interval_minutes: int = 0
 
 
 class NotificationOut(BaseModel):

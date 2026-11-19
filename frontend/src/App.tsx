@@ -1,20 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import { TopBar } from "./components/TopBar";
+import { Rail, type Tab } from "./components/Rail";
+import { ToastProvider } from "./components/Toast";
 import { CategoriesView } from "./views/CategoriesView";
 import { NotificationsView } from "./views/NotificationsView";
 import { StatusView } from "./views/StatusView";
 import { SubscriptionsView } from "./views/SubscriptionsView";
 import type { Health } from "./types";
-
-type Tab = "categories" | "subscriptions" | "notifications" | "status";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "categories", label: "Категории" },
-  { id: "subscriptions", label: "Подписки" },
-  { id: "notifications", label: "Уведомления" },
-  { id: "status", label: "Состояние" },
-];
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("categories");
@@ -49,39 +41,32 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app">
-      <TopBar health={health} />
+    <ToastProvider>
+      <div className="app">
+        <Rail active={tab} onChange={setTab} health={health} />
 
-      <nav className="tabs">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            className={item.id === tab ? "tab active" : "tab"}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
-
-      {health === null ? (
-        <section className="panel boot">
-          <h2>Запускаем локальное ядро…</h2>
-          <p className="muted">
-            Приложение подключается к локальному API. Обычно это занимает несколько секунд.
-            Если сообщение не исчезает, закройте другой экземпляр программы и запустите её снова.
-          </p>
-        </section>
-      ) : (
-        <>
-          {tab === "categories" ? (
-            <CategoriesView onOpenNotifications={() => setTab("notifications")} />
-          ) : null}
-          {tab === "subscriptions" ? <SubscriptionsView /> : null}
-          {tab === "notifications" ? <NotificationsView /> : null}
-          {tab === "status" ? <StatusView /> : null}
-        </>
-      )}
-    </div>
+        <main className="stage">
+          <div className="stage-inner">
+            {health === null ? (
+              <section className="panel boot">
+                <h2>Запускаем локальное ядро…</h2>
+                <p className="muted">
+                  Приложение подключается к локальному API. Обычно это занимает несколько секунд.
+                  Если сообщение не исчезает, закройте другой экземпляр программы и запустите её
+                  снова.
+                </p>
+              </section>
+            ) : (
+              <>
+                {tab === "categories" ? <CategoriesView /> : null}
+                {tab === "subscriptions" ? <SubscriptionsView /> : null}
+                {tab === "notifications" ? <NotificationsView /> : null}
+                {tab === "status" ? <StatusView health={health} /> : null}
+              </>
+            )}
+          </div>
+        </main>
+      </div>
+    </ToastProvider>
   );
 }

@@ -15,9 +15,9 @@
         "label": "main",
         "title": "FunPay Monitor",
         "width": 1280,
-        "height": 860,
-        "minWidth": 960,
-        "minHeight": 640,
+        "height": 960,
+        "minWidth": 1024,
+        "minHeight": 700,
         "center": true,
         "resizable": true
       }

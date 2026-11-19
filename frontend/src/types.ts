@@ -103,6 +103,10 @@ export interface Status {
   active_subscriptions: number;
   offers: number;
   parse_runs: ParseRun[];
+  scheduler_state: "off" | "active" | "paused" | "running";
+  next_run_at: string | null;
+  last_run_at: string | null;
+  interval_minutes: number;
 }
 
 export interface Notification {
